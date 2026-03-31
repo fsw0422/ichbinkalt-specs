@@ -1,6 +1,6 @@
 # Tasks: AI Conversation API
 
-**Input**: Design documents from `/home/fsw0422/ichbinkalt-backend/specs/001-backend-api/`
+**Input**: Design documents from `/home/ksp/projects/ichbinkalt-specs-001-backend-api/specs/001-backend-api/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/openapi.yaml
 
@@ -17,8 +17,10 @@
 ## Path Conventions
 
 - Single project at repository root
-- Source code: `src/`
+- Application code: `src/`
 - Tests: `test/`
+- Database migrations: `db/`
+- Delivery scripts: `ci.sh`, `cd.sh`
 
 ---
 
@@ -26,12 +28,12 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create NestJS project structure at repository root with src/ and test/ directories
+- [ ] T001 Create NestJS project structure at repository root with src/, test/, db/, ci.sh, and cd.sh
 - [ ] T002 Initialize Node.js project with package.json and install NestJS dependencies (@nestjs/core, @nestjs/common, @nestjs/platform-express, @nestjs/platform-socket.io, @nestjs/websockets)
 - [ ] T003 [P] Configure TypeScript with tsconfig.json for Node.js >= 18 target
 - [ ] T004 [P] Configure ESLint and Prettier for code quality
 - [ ] T005 [P] Setup Jest testing framework in test/ directory
-- [ ] T006 [P] Setup Docker configuration with Dockerfile at repository root
+- [ ] T006 [P] Setup Docker configuration with Dockerfile, Dockerfile.builder, Dockerfile.dbmigrator, and docker-compose.yml at repository root
 - [ ] T007 [P] Create .gitignore file for Node.js project
 
 ---
@@ -42,15 +44,15 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
- - [ ] T008 Create hexagonal architecture folder structure: src/core/{entities,ports,services,dtos}, src/adapters/{primary,secondary}
+ - [ ] T008 Create backend-aligned folder structure: src/core/{dtos,entities,ports/{primary,secondary},services,validation}, src/adapters/{primary/{rest,websocket},secondary/{gemini-live,typeorm}}, src/config, and db/changelog
  - [ ] T009 [P] Setup configuration module in src/config/ConfigModule.ts for environment variables
  - [ ] T010 [P] Create environment configuration service in src/config/ConfigService.ts
  - [ ] T011 [P] Implement structured logging with correlation IDs in src/config/LoggerService.ts
  - [ ] T012 [P] Create health check endpoint in src/adapters/primary/rest/HealthController.ts
  - [ ] T013 [P] Setup OpenAPI/Swagger documentation configuration in src/Main.ts
- - [ ] T014 [P] Create global exception filter in src/config/ExceptionFilter.ts
+ - [ ] T014 [P] Create global exception filter in src/config/GlobalExceptionFilter.ts
  - [ ] T015 [P] Setup graceful shutdown handler in src/Main.ts
- - [ ] T016 Create base application module structure in src/AppModule.ts
+ - [ ] T016 Create base application module structure in src/AppModule.ts, src/ConversationModule.ts, and src/ConversationEventDispatcherModule.ts
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -77,12 +79,12 @@
 
 ### Port Interfaces for User Story 1
 
- - [ ] T025 [P] [US1] Create IConversationRepository port interface in src/core/ports/IConversationRepository.ts
- - [ ] T028 [P] [US1] Create ILiveLesson port interface in src/core/ports/ILiveLesson.ts
+ - [ ] T025 [P] [US1] Create IConversationRepository port interface in src/core/ports/secondary/IConversationRepository.ts
+ - [ ] T028 [P] [US1] Create ILiveSession port interface in src/core/ports/secondary/ILiveSession.ts
 
-### In-Memory Repository for User Story 1
+### Persistence Adapter for User Story 1
 
- - [ ] T029 [US1] Implement InMemoryConversationRepository in src/adapters/secondary/repositories/InMemoryConversationRepository.ts (depends on T019, T025)
+ - [ ] T029 [US1] Implement ConversationRepository in src/adapters/secondary/typeorm/ConversationRepository.ts (depends on T019, T025)
 
 ### External Service Adapters for User Story 1
 
@@ -97,32 +99,32 @@
  - [ ] T060 [US1] Add transcription callback types (InputTranscriptionCallback, OutputTranscriptionCallback) to AISessionEntity (depends on T058, T059)
  - [ ] T061 [US1] Implement addInputTranscriptionCallback/removeInputTranscriptionCallback in IAISessionRepository (depends on T060)
  - [ ] T062 [US1] Implement addOutputTranscriptionCallback/removeOutputTranscriptionCallback in IAISessionRepository (depends on T060)
- - [ ] T063 [US1] Emit input_transcription WebSocket events to clients in LessonGateway (depends on T061)
- - [ ] T064 [US1] Emit output_transcription WebSocket events to clients in LessonGateway (depends on T062)
+ - [ ] T063 [US1] Emit input_transcription WebSocket events to clients in ConversationGateway (depends on T061)
+ - [ ] T064 [US1] Emit output_transcription WebSocket events to clients in ConversationGateway (depends on T062)
  - [ ] T065 [US1] Persist user transcriptions to ConversationRepository as Message entities (depends on T063)
  - [ ] T066 [US1] Persist AI transcriptions to ConversationRepository as Message entities (depends on T064)
 
 ### Services for User Story 1
 
- - [ ] T032 [US1] Implement CreateConversationService in src/core/services/CreateConversationService.ts (depends on T019, T029)
- - [ ] T033 [US1] Implement ProcessAudioStreamService in src/core/services/ProcessAudioStreamService.ts (depends on T029, T031)
- - [ ] T034 [US1] Implement GenerateAIResponseService in src/core/services/GenerateAIResponseService.ts (depends on T029, T031)
- - [ ] T035 [US1] Implement TerminateConversationService in src/core/services/TerminateConversationService.ts (depends on T029)
+ - [ ] T032 [US1] Implement ConversationService in src/core/services/ConversationService.ts for conversation lifecycle management (depends on T019, T025, T028-T031)
+ - [ ] T033 [US1] Implement WebSocket audio streaming flow in src/adapters/primary/websocket/ConversationGateway.ts, including `audio_chunk` handling and `audio_stream_end` signaling (depends on T029, T031, T032)
+ - [ ] T034 [US1] Implement Gemini Live response handling in src/adapters/secondary/gemini-live/GeminiLiveService.ts (depends on T028, T030)
+ - [ ] T035 [US1] Implement conversation event dispatch integration in src/adapters/primary/websocket/ConversationEventDispatcher.ts (depends on T033, T034)
 
 ### Primary Adapters (REST Controllers) for User Story 1
 
-- [ ] T036 [US1] Create ConversationsController for REST API in src/adapters/primary/rest/ConversationsController.ts (depends on T032)
+- [ ] T036 [US1] Create ConversationController for REST API in src/adapters/primary/rest/ConversationController.ts (depends on T032)
 
 ### Session Management & Edge Cases for User Story 1
 
- - [ ] T037 [US1] Implement 5-minute session timeout mechanism in src/core/services/ProcessAudioStreamService.ts (depends on T033)
+ - [ ] T037 [US1] Implement 5-minute session timeout mechanism in src/adapters/primary/websocket/ConversationGateway.ts (depends on T033)
 
  - [ ] T039 [US1] Configure AI to enforce German/English only conversation in src/adapters/secondary/gemini-live/GeminiLiveService.ts (depends on T031)
 
 ### Integration & Validation for User Story 1
 
- - [ ] T040 [US1] Wire all services and adapters in ConversationModule in src/adapters/ConversationModule.ts (depends on T032-T036)
- - [ ] T036 [US1] Register ConversationModule in root AppModule.ts (depends on T040)
+ - [ ] T040 [US1] Wire all services and adapters in ConversationModule in src/ConversationModule.ts (depends on T032-T036)
+ - [ ] T041 [US1] Register ConversationModule in root AppModule.ts (depends on T040)
  - [ ] T042 [US1] Add OpenAPI documentation for POST /api/v1/conversations endpoint (depends on T036)
  - [ ] T043 [US1] Validate conversation creation returns conversation_id and websocket_url per contract (depends on T036)
  - [ ] T044 [US1] Add error handling for missing or invalid API keys (depends on T032, T034, T031)
@@ -140,8 +142,8 @@
  - [ ] T047 [P] Document API usage examples in docs/api-examples.md
  - [ ] T048 [P] Add performance monitoring for latency metrics (transcription <500ms, AI response <3s) in src/config/MetricsService.ts
  - [ ] T049 [P] Implement rate limiting for concurrent user protection (100+ concurrent conversations) in src/config/RateLimiterGuard.ts
- - [ ] T050 [P] Setup CI/CD pipeline structure in cicd/ directory per plan.md
- - [ ] T051 [P] Create infrastructure as code with Terraform scaffolding in infra/ directory
+ - [ ] T050 [P] Setup CI/CD script structure in ci.sh and cd.sh per plan.md
+ - [ ] T051 [P] Create database migration scaffolding in db/run-postgres-migrations.sh and db/changelog/ per plan.md
  - [ ] T052 [P] Security audit: validate HTTPS configuration and token-based auth preparation
  - [ ] T053 Performance testing: verify 95% transcription accuracy (WER <10%)
  - [ ] T054 Performance testing: verify p95 transcription latency <500ms
@@ -163,14 +165,14 @@
 
 **Critical Path**:
  1. Entities (T017-T019) → Foundation for all other components
- 2. DTOs (T020-T024) → Required by services and adapters
+ 2. DTOs (T020-T023) → Required by services and adapters
  3. Port Interfaces (T025-T028) → Required by services and implementations
- 4. Repository (T029) → Required by services
+ 4. Persistence Adapter (T029) → Required by services
  5. External Services (T030-T031) → Required by services
- 6. Services (T032-T035) → Required by controllers
+ 6. Services and WebSocket Flow (T032-T035) → Required by controllers and realtime messaging
  7. Controllers (T036) → Primary entry points
- 8. Session Management (T037, T038-T039) → Edge case handling
- 9. Integration (T040-T042, T043, T044-T045) → Final wiring and validation
+ 8. Session Management (T037, T039) → Edge case handling
+ 9. Integration (T040-T045) → Final wiring and validation
 
 **Within User Story 1**:
 - Entities and DTOs can be created in parallel
@@ -190,14 +192,14 @@
 
 **Phase 3 (User Story 1)**:
 - Entities: T017, T018, T019 can run in parallel
-- DTOs: T020-T024 can run in parallel
+- DTOs: T020-T023 can run in parallel
 - Port Interfaces: T025-T028 can run in parallel
  - Service Modules: T030 can run in parallel
  - - After modules: T032, T034 can run in parallel (each depends only on their respective module)
-- Services: T032-T035 can run in parallel after dependencies are met
+- Services and WebSocket flow: T032-T035 can run in parallel after dependencies are met
 - Controllers: T036 can run after dependencies are met
 
- **Phase 4 (Polish)**: Tasks T046-T052 can run in parallel, then T053-T057 follow
+ **Phase 4 (Polish)**: Tasks T046-T052 can run in parallel, then T053-T056 follow
 
 ---
 
@@ -219,13 +221,12 @@
 
 
 # Batch 3: Port Interfaces (after or during Batch 1-2)
- Task T025: "Create IConversationRepository port interface"
- Task T026: "Create ISpeechToTextService port interface"
- Task T027: "Create ITextToSpeechService port interface"
- Task T028: "Create ILiveLesson port interface"
+ Task T025: "Create IConversationRepository port interface in src/core/ports/secondary/IConversationRepository.ts"
+ Task T028: "Create ILiveSession port interface in src/core/ports/secondary/ILiveSession.ts"
 
 # Batch 4: External Service Modules (after Batch 3)
- Task T030: "Create Gemini Live LLM adapter module"
+ Task T029: "Implement ConversationRepository in src/adapters/secondary/typeorm/ConversationRepository.ts"
+ Task T030: "Create Gemini Live LLM adapter module in src/adapters/secondary/gemini-live/GeminiLiveModule.ts"
 ```
 
 ---
@@ -237,8 +238,8 @@
 This feature specification contains only ONE user story (US1), making the entire Phase 3 the MVP.
 
  1. **Complete Phase 1**: Setup → ~7 tasks → Project structure ready
- 2. **Complete Phase 2**: Foundational → ~9 tasks → Core infrastructure ready
- 3. **Complete Phase 3**: User Story 1 → ~29 tasks → Full conversation API functional
+2. **Complete Phase 2**: Foundational → ~9 tasks → Backend-aligned structure and infrastructure ready
+3. **Complete Phase 3**: User Story 1 → ~29 tasks → Full conversation API functional
 4. **STOP and VALIDATE**:
    - Test conversation creation via REST API
    - Verify conversation creation returns conversation_id and websocket_url per contract

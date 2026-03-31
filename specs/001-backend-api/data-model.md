@@ -40,7 +40,7 @@ Represents a single turn in a conversation, either from the user or the AI. Mess
 
 The system uses Gemini Live's native transcription capabilities:
 
-1. **User Speech → Text**: When the user sends audio via `audio_chunk` events, Gemini Live processes it and returns transcriptions via `inputTranscription` in the server messages. These are stored as `Message` entities with `sender: 'user'`.
+1. **User Speech → Text**: The client streams an utterance via `audio_chunk` events and then sends `audio_stream_end` to mark that utterance as complete. Gemini Live then finalizes processing and returns transcriptions via `inputTranscription` in the server messages. These are stored as `Message` entities with `sender: 'user'`.
 
 2. **AI Speech → Text**: When Gemini Live generates audio responses, it simultaneously provides transcriptions via `outputTranscription`. These are stored as `Message` entities with `sender: 'ai'`.
 
@@ -48,6 +48,7 @@ The system uses Gemini Live's native transcription capabilities:
 
 | Event | Direction | Payload | Description |
 |-------|-----------|---------|-------------|
+| `audio_stream_end` | Client → Server | `{}` | Explicit signal that the current user audio stream has ended |
 | `input_transcription` | Server → Client | `{ text: string, conversationId: string }` | Transcription of user's speech |
 | `output_transcription` | Server → Client | `{ text: string, conversationId: string }` | Transcription of AI's speech |
 | `ai_audio_response` | Server → Client | `{ audioData: string, mimeType: string }` | AI's audio response |

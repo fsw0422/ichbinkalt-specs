@@ -1,7 +1,7 @@
 # Implementation Plan: AI Conversation API
 
-**Branch**: `001-backend-api` | **Date**: 2025-11-09 | **Updated**: 2025-11-14 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `/home/fsw0422/projects/ichbinkalt-backend/specs/001-backend-api/spec.md`
+**Branch**: `001-backend-api` | **Date**: 2025-11-09 | **Updated**: 2026-04-01 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/home/ksp/projects/ichbinkalt-specs-001-backend-api/specs/001-backend-api/spec.md`
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
 - Better context understanding (audio-to-audio processing)
 
@@ -20,7 +20,7 @@ This plan outlines the implementation of a backend service for a German learning
   - Speech-to-Text (STT): Built-in (model: `gemini-2.5-flash-native-audio-preview-09-2025`)
   - Text-to-Speech (TTS): Built-in (model: `gemini-2.5-flash-preview-tts`)
   - Conversational AI (LLM): Built-in (same unified model)
-**Storage**: In-memory (volatile session storage).
+**Storage**: PostgreSQL via TypeORM for conversations, lessons, and messages.
 **Testing**: Jest
 **Target Platform**: Linux server (containerized).
 **Project Type**: Backend service for a web/mobile application.
@@ -67,71 +67,69 @@ specs/001-backend-api/
 ### CI/CD
 
 ```text
-cicd/
-├── builder/
-│   ├── Dockerfile         # Builder container
-│   └── run.sh             # Build script
-├── ci/
-│   ├── Dockerfile         # CI container
-│   └── run.sh             # CI script
-├── cd/
-│   ├── Dockerfile         # CD container
-│   └── run.sh             # CD script
-Dockerfile                 # Docker containerization
+ci.sh                      # CI entrypoint
+cd.sh                      # CD build, migration, and deployment entrypoint
+Dockerfile                 # Runtime container image
+Dockerfile.builder         # Builder image
+Dockerfile.dbmigrator      # Database migration image
+docker-compose.yml         # Local orchestration
 ```
 
-### Infrastructure
+### Database
 
 ```text
-iac/                       # Infrastructure as Code (Terraform for provisioning cloud resources)
+db/
+├── changelog/
+│   ├── 001-create-conversations-table.sql
+│   ├── 002-create-messages-table.sql
+│   ├── 003-create-lessons-table.sql
+│   └── db.changelog-master.xml
+└── run-postgres-migrations.sh
 ```
 
 ### Source Code
 ```text
 src/
-├── core/
-│   ├── entities/          # Domain entities (User, Conversation, Message)
-│   ├── ports/             # Domain interfaces (repositories, external services)
-│   ├── services/          # Application services (business logic)
-│   └── dtos/              # Data transfer objects
+├── AppModule.ts
+├── ConversationModule.ts
+├── ConversationEventDispatcherModule.ts
+├── Main.ts                # Application bootstrap
 ├── adapters/
 │   ├── primary/
-│   │   ├── rest/          # REST controllers (entry points)
-│   │   └── websocket/     # WebSocket gateways
-│   └── secondary/         # External services integrations
-│       ├── repositories/  # In-memory storage implementation
-│       └── gemini-native-audio/  # Unified Gemini Native Audio service
-├── config/                # Configuration, environment setup
-└── main.ts                # Application bootstrap
-test/
+│   │   ├── rest/          # REST controllers
+│   │   └── websocket/     # WebSocket gateways and sockets
+│   └── secondary/
+│       ├── gemini-live/   # Gemini Live integration
+│       └── typeorm/       # TypeORM repositories and persistence entities
+├── config/                # Configuration, logging, validation, exception handling
 ├── core/
-│   ├── entities/
+│   ├── dtos/              # Data transfer objects
+│   ├── entities/          # Domain entities
 │   ├── ports/
-│   ├── services/
-│   └── dtos/
+│   │   ├── primary/       # Use-case interfaces exposed to adapters
+│   │   └── secondary/     # Repository and infrastructure ports
+│   ├── services/          # Business logic
+│   └── validation/        # Shared validation schemas
+test/
 ├── adapters/
 │   ├── primary/
 │   │   ├── rest/
 │   │   └── websocket/
 │   └── secondary/
-│       ├── repositories/
-│       └── gemini-native-audio/
+│       └── typeorm/
 └── config/
 ```
 
 ### Development Environment
 
 ```text
-.vscode/
-├── launch.json
-└── settings.json
 .devcontainer/
-├── devcontainer.json      # Using cicd/builder/Dockerfile as base image
-└── post-create.sh
+└── devcontainer.json
+.vscode/
 ```
 
-**Structure Decision**: The structure explicitly follows hexagonal architecture principles. The `core` layer contains domain entities, ports (interfaces), services (business logic), and DTOs. The `adapters` layer is divided into `primary` (entry points like REST controllers and WebSocket gateways) and `secondary` (external dependencies).
+**Structure Decision**: The structure follows the backend repository as implemented and continues to follow hexagonal architecture principles. The `core` layer contains entities, DTOs, ports, services, and validation rules. The `adapters` layer is split into `primary` adapters for HTTP and WebSocket entrypoints and `secondary` adapters for Gemini Live and TypeORM persistence. Root-level modules (`AppModule.ts`, `ConversationModule.ts`, `ConversationEventDispatcherModule.ts`, and `Main.ts`) compose those pieces into the NestJS application.
 
-**Note on Unified Service**: The `gemini-native-audio` adapter implements all three service ports (`ISpeechToTextService`, `ITextToSpeechService`, and `ILiveLesson`) in a single service class. This is a deliberate architectural decision that takes advantage of Gemini's native audio capabilities while maintaining the hexagonal architecture principles through the port interfaces. The core domain logic remains independent and can be tested with mock implementations of these ports.
+**Note on Unified Service**: The `gemini-live` adapter implements the live-session integration behind the secondary ports, while the `typeorm` adapter owns database persistence. This preserves hexagonal boundaries while matching the backend's concrete module layout.
 
-This separation ensures the core logic remains independent of external concerns, improving testability and maintainability. The `test` directory mirrors the `src` structure to facilitate organized unit and integration testing.
+This separation keeps the core logic independent of external concerns while aligning the documented structure with the backend repository used for implementation. The `test` directory mirrors the exercised adapter and config areas that exist in the backend today.
