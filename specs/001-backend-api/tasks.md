@@ -1,4 +1,3 @@
-````markdown
 # Tasks: AI Conversation API
 
 **Input**: Design documents from `/home/fsw0422/ichbinkalt-backend/specs/001-backend-api/`
@@ -320,5 +319,3 @@ With 2-3 developers:
   - <500ms transcription latency (p95)
   - <3s AI response latency (p95)
   - Support 100+ concurrent conversations
-
-````
