@@ -1,7 +1,7 @@
 # Implementation Plan: AI Conversation API
 
-**Branch**: `001-ai-conversation-api` | **Date**: 2025-11-09 | **Updated**: 2025-11-14 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `/home/fsw0422/projects/ichbinkalt-backend/specs/001-ai-conversation-api/spec.md`
+**Branch**: `001-backend-api` | **Date**: 2025-11-09 | **Updated**: 2025-11-14 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/home/fsw0422/projects/ichbinkalt-backend/specs/001-backend-api/spec.md`
 **Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/commands/plan.md` for the execution workflow.
 - Better context understanding (audio-to-audio processing)
 
@@ -56,7 +56,7 @@ All constitutional gates pass.
 ### Documentation (this feature)
 
 ```text
-specs/001-ai-conversation-api/
+specs/001-backend-api/
 ├── plan.md                # This file (/speckit.plan command output)
 ├── research.md            # Phase 0 output (/speckit.plan command)
 ├── data-model.md          # Phase 1 output (/speckit.plan command)

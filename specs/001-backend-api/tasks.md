@@ -1,7 +1,7 @@
 ````markdown
 # Tasks: AI Conversation API
 
-**Input**: Design documents from `/home/fsw0422/ichbinkalt-backend/specs/001-ai-conversation-api/`
+**Input**: Design documents from `/home/fsw0422/ichbinkalt-backend/specs/001-backend-api/`
 
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/openapi.yaml
 

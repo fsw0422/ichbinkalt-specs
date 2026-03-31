@@ -1,6 +1,6 @@
 # Feature Specification: AI Conversation API for German Learning App
 
-**Feature Branch**: `001-ai-conversation-api`
+**Feature Branch**: `001-backend-api`
 **Created**: 2025-11-09
 **Status**: Draft
 **Input**: User description: "I'm a technical product manager now, and would want to build a backend for an application for learning German. The backend will be providing APIs for users to have interactive conversation with the AI. User should be able to read the transcription in realtime. Let's just start from here as I'll add more specs so we can incrementally build the application together"
