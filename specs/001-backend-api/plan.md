@@ -80,10 +80,6 @@ docker-compose.yml         # Local orchestration
 ```text
 db/
 ├── changelog/
-│   ├── 001-create-conversations-table.sql
-│   ├── 002-create-messages-table.sql
-│   ├── 003-create-lessons-table.sql
-│   └── db.changelog-master.xml
 └── run-postgres-migrations.sh
 ```
 
@@ -91,8 +87,6 @@ db/
 ```text
 src/
 ├── AppModule.ts
-├── ConversationModule.ts
-├── ConversationEventDispatcherModule.ts
 ├── Main.ts                # Application bootstrap
 ├── adapters/
 │   ├── primary/
@@ -123,8 +117,6 @@ test/
 ### Development Environment
 
 ```text
-.devcontainer/
-└── devcontainer.json
 .vscode/
 ```
 
