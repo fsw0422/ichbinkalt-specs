@@ -41,9 +41,442 @@ paths:
         '101':
           description: Switching protocols to WebSocket.
 
+  /api/v1/users/{userId}:
+    get:
+      summary: Get full user profile
+      operationId: get_user
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Full user profile with nested learning profile, usage stats, and preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullUserResponse'
+        '404':
+          description: User not found.
+    put:
+      summary: Update user core identity
+      operationId: update_user
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullUserResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/users/{userId}/learning-profile:
+    put:
+      summary: Create or update user's learning profile
+      operationId: update_learning_profile
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLearningProfileRequest'
+      responses:
+        '200':
+          description: Learning profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserLearningProfileResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/users/{userId}/preferences:
+    put:
+      summary: Create or update user's preferences
+      operationId: update_preferences
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferences updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferencesResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/auth/magic-link:
+    post:
+      summary: Request a magic link
+      operationId: request_magic_link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+      responses:
+        '200':
+          description: Magic link sent to email (response is always 200 to prevent email enumeration).
+        '429':
+          description: Rate limit exceeded (5 requests per email per hour).
+
+  /api/v1/auth/verify-magic-link:
+    post:
+      summary: Verify a magic link token
+      operationId: verify_magic_link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyMagicLinkRequest'
+      responses:
+        '200':
+          description: Token verified. Returns JWT tokens and user info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Token is invalid, expired, or already used.
+
+  /api/v1/auth/passkeys/registration-options:
+    post:
+      summary: Get WebAuthn registration challenge options
+      operationId: get_passkey_registration_options
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: WebAuthn registration options.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasskeyRegistrationOptions'
+
+  /api/v1/auth/passkeys/register:
+    post:
+      summary: Register a passkey credential
+      operationId: register_passkey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyRegistrationCredential'
+      responses:
+        '201':
+          description: Passkey registered successfully.
+        '400':
+          description: Invalid credential.
+
+  /api/v1/auth/passkeys/authentication-options:
+    post:
+      summary: Get WebAuthn authentication challenge options
+      operationId: get_passkey_authentication_options
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyAuthenticationOptionsRequest'
+      responses:
+        '200':
+          description: WebAuthn authentication options.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasskeyAuthenticationOptions'
+
+  /api/v1/auth/passkeys/authenticate:
+    post:
+      summary: Authenticate with a passkey
+      operationId: authenticate_passkey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyAuthenticationCredential'
+      responses:
+        '200':
+          description: Authentication successful. Returns JWT tokens.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid passkey assertion.
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh access token
+      operationId: refresh_token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: New tokens issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Refresh token is invalid, expired, or revoked.
+
+  /api/v1/auth/logout:
+    post:
+      summary: Logout and revoke refresh token
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Refresh token revoked.
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
   schemas:
-    # WebSocket Messages (for documentation purposes)
+    # ---- User API Schemas ----
+    UpdateUserRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+        - displayName
+
+    FullUserResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        learningProfile:
+          $ref: '#/components/schemas/UserLearningProfileResponse'
+        usageStats:
+          $ref: '#/components/schemas/UserUsageStatsResponse'
+        preferences:
+          $ref: '#/components/schemas/UserPreferencesResponse'
+
+    UpdateLearningProfileRequest:
+      type: object
+      properties:
+        learningLevel:
+          type: string
+          enum: [A1, A2, B1, B2, C1, C2]
+        nativeLanguage:
+          type: string
+          minLength: 1
+          maxLength: 100
+        learningGoals:
+          type: array
+          items:
+            type: string
+            enum: [travel, work, academic, immigration, hobby]
+        correctionStyle:
+          type: string
+          enum: [gentle, moderate, strict]
+        topicsOfInterest:
+          type: array
+          items:
+            type: string
+      required:
+        - learningLevel
+        - nativeLanguage
+        - correctionStyle
+
+    UserLearningProfileResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        learningLevel:
+          type: string
+          enum: [A1, A2, B1, B2, C1, C2]
+        nativeLanguage:
+          type: string
+        learningGoals:
+          type: array
+          items:
+            type: string
+            enum: [travel, work, academic, immigration, hobby]
+        correctionStyle:
+          type: string
+          enum: [gentle, moderate, strict]
+        topicsOfInterest:
+          type: array
+          items:
+            type: string
+
+    UserUsageStatsResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        totalConversationCount:
+          type: integer
+        totalPracticeMinutes:
+          type: integer
+        currentStreak:
+          type: integer
+        longestStreak:
+          type: integer
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        timezone:
+          type: string
+          description: IANA timezone identifier (e.g. Europe/Berlin)
+          maxLength: 100
+        uiLanguage:
+          type: string
+          description: UI language code (e.g. en, de, ko)
+          maxLength: 10
+      required:
+        - timezone
+        - uiLanguage
+
+    UserPreferencesResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        timezone:
+          type: string
+        uiLanguage:
+          type: string
+
+    # ---- Auth Schemas ----
+    MagicLinkRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    VerifyMagicLinkRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The magic link token from the email URL.
+      required:
+        - token
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token (15 min expiry).
+        refreshToken:
+          type: string
+          description: Refresh token (7 day expiry).
+        userId:
+          type: string
+          format: uuid
+        passkeyRegistrationRequired:
+          type: boolean
+          description: True if the user has no registered passkeys.
+
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required:
+        - refreshToken
+
+    PasskeyRegistrationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialCreationOptions (structure defined by WebAuthn spec).
+
+    PasskeyRegistrationCredential:
+      type: object
+      description: WebAuthn registration response from navigator.credentials.create() (structure defined by WebAuthn spec).
+
+    PasskeyAuthenticationOptionsRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    PasskeyAuthenticationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialRequestOptions (structure defined by WebAuthn spec).
+
+    PasskeyAuthenticationCredential:
+      type: object
+      description: WebAuthn authentication response from navigator.credentials.get() (structure defined by WebAuthn spec).
+
+    # ---- WebSocket Message Schemas ----
     ClientMessage:
       oneOf:
         - $ref: '#/components/schemas/AudioChunk'

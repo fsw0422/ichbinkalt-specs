@@ -31,6 +31,42 @@ The client application can initiate, conduct, and terminate an interactive audio
 
 - **Unsupported Language**: The AI will be instructed to respond only in German or English. If the user speaks another language, the AI will gently guide them back to using German or English.
 
+### User Story 2 - User Profile Management API (Priority: P1)
+
+An authenticated user can manage their profile, learning preferences, and view their usage statistics via REST API endpoints. User creation happens during magic link verification (User Story 3).
+
+**Why this priority**: User profile and learning preferences drive AI personalization (correction style, topics, native language). Without these, conversations cannot be tailored to the learner.
+
+**Independent Test**: An authenticated client can retrieve their full profile, update display name, set learning preferences and app preferences via dedicated endpoints.
+
+**Acceptance Scenarios**:
+
+1.  **Given** an authenticated user, **When** the client sends a `GET` request to `/api/v1/users/{userId}`, **Then** the backend returns a `200 OK` response with the full user object including nested `learningProfile`, `usageStats`, and `preferences`.
+2.  **Given** an authenticated user, **When** the client sends a `PUT` request to `/api/v1/users/{userId}` with updated `displayName`, **Then** the backend updates the user record and returns `200 OK` with the updated user.
+3.  **Given** an authenticated user, **When** the client sends a `PUT` request to `/api/v1/users/{userId}/learning-profile` with `learningLevel`, `nativeLanguage`, and `correctionStyle`, **Then** the backend creates/updates the learning profile and returns `200 OK`.
+4.  **Given** an authenticated user, **When** the client sends a `PUT` request to `/api/v1/users/{userId}/preferences` with `timezone` and `uiLanguage`, **Then** the backend creates/updates the preferences and returns `200 OK`.
+
+### User Story 3 - Authentication: Magic Link & Passkey (Priority: P1)
+
+Users can sign up and log in using magic links sent to their email. After first sign-up, a passkey registration flow is triggered so subsequent logins can use WebAuthn passkeys. Magic link remains as a fallback. No passwords or OAuth.
+
+**Why this priority**: Authentication is required before any user-facing feature can be accessed securely. All other user stories depend on knowing who the user is.
+
+**Independent Test**: A new user can sign up via magic link, register a passkey, log out, and log back in using either passkey or magic link fallback.
+
+**Acceptance Scenarios**:
+
+1.  **Given** a user (new or existing) wants to log in, **When** the client sends a `POST` request to `/api/v1/auth/magic-link` with `email`, **Then** the backend generates a single-use token (15 min expiry), sends an email with the magic link, and returns `200 OK`.
+2.  **Given** a user clicks the magic link, **When** the client sends a `POST` request to `/api/v1/auth/verify-magic-link` with the `token`, **Then** the backend validates the token (not expired, not used), marks it consumed, and returns `200 OK` with `accessToken` (JWT, 15 min), `refreshToken` (7 day), `userId`, and `passkeyRegistrationRequired` (true if user has no passkeys).
+3.  **Given** a new user verifying a magic link for the first time, **When** the token is valid and no `User` record exists for that email, **Then** the backend creates a new `User` (with `displayName` defaulting to the email local part) along with default `UserLearningProfile`, `UserUsageStats`, and `UserPreferences`, and returns the response with `passkeyRegistrationRequired: true`.
+4.  **Given** an authenticated user with `passkeyRegistrationRequired: true`, **When** the client sends a `POST` request to `/api/v1/auth/passkeys/registration-options`, **Then** the backend generates and returns WebAuthn registration challenge options.
+5.  **Given** the client has completed the WebAuthn ceremony, **When** it sends a `POST` request to `/api/v1/auth/passkeys/register` with the credential, **Then** the backend verifies the credential and stores the public key, returning `201 Created`.
+6.  **Given** a returning user with a registered passkey, **When** the client sends a `POST` request to `/api/v1/auth/passkeys/authentication-options` with `email`, **Then** the backend returns WebAuthn authentication challenge options.
+7.  **Given** the client has signed the challenge with a passkey, **When** it sends a `POST` request to `/api/v1/auth/passkeys/authenticate` with the signed response, **Then** the backend verifies the signature, updates the passkey `lastUsedAt` and counter, and returns `200 OK` with `accessToken`, `refreshToken`, and `userId`.
+8.  **Given** an authenticated user with a valid refresh token, **When** the client sends a `POST` request to `/api/v1/auth/refresh` with the `refreshToken`, **Then** the backend issues a new `accessToken` and `refreshToken`, revokes the old refresh token, and returns `200 OK`.
+9.  **Given** an authenticated user, **When** the client sends a `POST` request to `/api/v1/auth/logout` with the `refreshToken`, **Then** the backend revokes the refresh token and returns `200 OK`.
+10. **Given** a user requests a magic link, **When** more than 5 requests are made for the same email within 1 hour, **Then** the backend returns `429 Too Many Requests`.
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
@@ -45,10 +81,28 @@ The client application can initiate, conduct, and terminate an interactive audio
 - **FR-008**: The system MUST persist transcriptions (both user and AI) to the conversation history as `Message` entities for future retrieval and display.
 - **FR-009**: The system MUST enable both `inputAudioTranscription` and `outputAudioTranscription` when configuring the Gemini Live session to receive transcriptions synchronously with audio streaming.
 - **FR-010**: The client MUST send an explicit `audio_stream_end` WebSocket message after the last `audio_chunk` of an utterance, and the backend MUST forward that signal to Gemini Live so the utterance is finalized for transcription and response generation.
+- **FR-011**: The system MUST provide a REST API endpoint to retrieve the full user profile (`GET /api/v1/users/{userId}`) including nested `learningProfile`, `usageStats`, and `preferences` in a single response.
+- **FR-012**: The system MUST provide a REST API endpoint to update the user's core identity (`PUT /api/v1/users/{userId}`), specifically `displayName`.
+- **FR-013**: The system MUST provide a REST API endpoint to update a user's learning profile (`PUT /api/v1/users/{userId}/learning-profile`), including `learningLevel`, `nativeLanguage`, `learningGoals`, `correctionStyle`, and `topicsOfInterest`.
+- **FR-014**: The system MUST provide a REST API endpoint to update a user's preferences (`PUT /api/v1/users/{userId}/preferences`), including `timezone` and `uiLanguage`. Usage stats are read-only for the client and updated by the system after conversations.
+- **FR-015**: When a new user is created during magic link verification, the system MUST initialize default records for `UserLearningProfile` (correctionStyle: `moderate`), `UserUsageStats` (all zeros), and `UserPreferences` (timezone: `UTC`, uiLanguage: `en`). The `displayName` defaults to the email local part.
+- **FR-016**: The system MUST support magic link authentication. A single-use token (hashed) with 15-minute expiry is generated, emailed to the user, and verified on click. If no `User` exists for the email, one is created with defaults.
+- **FR-017**: The system MUST support WebAuthn passkey registration and authentication. A user can register multiple passkeys (one-to-many). Passkey login returns JWT tokens.
+- **FR-018**: The system MUST issue JWT access tokens (15 min expiry) and refresh tokens (7 day expiry). Refresh tokens are stored hashed and support rotation and revocation.
+- **FR-019**: All authenticated endpoints (User Story 1 and 2) MUST be protected by a JWT auth guard that validates the access token from the `Authorization: Bearer <token>` header.
+- **FR-020**: The system MUST rate-limit magic link requests to 5 per email per hour to prevent abuse.
+- **FR-021**: The email delivery MUST be abstracted behind a port interface (`IEmailService`) so the provider can be swapped without changing business logic.
+- **FR-022**: Magic link MUST remain available as a login fallback even after a user has registered passkeys.
 
 ### Key Entities *(include if feature involves data)*
 
-- **User**: Represents a learner using the application. Key attributes: `user_id`, `name`, `learning_level`.
+- **User**: Represents a learner. Key attributes: `user_id`, `display_name`, `email`, `created_at`, `updated_at`, `last_active_at`.
+- **UserLearningProfile**: One-to-one with User. Key attributes: `user_id`, `learning_level` (CEFR A1–C2), `native_language`, `learning_goals`, `correction_style`, `topics_of_interest`.
+- **UserUsageStats**: One-to-one with User. Key attributes: `user_id`, `total_conversation_count`, `total_practice_minutes`, `current_streak`, `longest_streak`.
+- **UserPreferences**: One-to-one with User. Key attributes: `user_id`, `timezone`, `ui_language`.
+- **MagicLinkToken**: Single-use authentication token. Key attributes: `token_id`, `email`, `token_hash`, `expires_at`, `used_at`, `created_at`.
+- **UserPasskey**: WebAuthn credential (one-to-many with User). Key attributes: `passkey_id`, `user_id`, `credential_id`, `public_key`, `counter`, `device_name`, `created_at`, `last_used_at`.
+- **RefreshToken**: JWT refresh token for session rotation/revocation. Key attributes: `token_id`, `user_id`, `token_hash`, `expires_at`, `revoked_at`, `created_at`.
 - **Conversation**: Represents a single interactive session between a user and the AI. Key attributes: `conversation_id`, `user_id`, `start_time`, `end_time`.
 - **Message**: Represents a single turn in a conversation. Key attributes: `message_id`, `conversation_id`, `sender` (user or AI), `text_content`, `audio_data` (optional), `timestamp`. Transcriptions from both user input audio and AI output audio are stored as Message entities.
 

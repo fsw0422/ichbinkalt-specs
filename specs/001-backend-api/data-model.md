@@ -4,13 +4,94 @@ This document defines the key data entities for the AI Conversation API feature,
 
 ## 1. User
 
-Represents a learner using the application. This model is included for conceptual clarity, but will not be persisted in the initial version.
+Represents a learner using the application. The User entity is composed of a core identity record and related detail tables for learning profile, usage stats, and preferences.
 
-- **Entity**: `User`
-- **Attributes**:
-  - `userId`: `string` (UUID) - Unique identifier for the user.
-  - `name?`: `string` - The user's display name.
-  - `learningLevel?`: `string` - The user's self-assessed German proficiency (e.g., A1, B2).
+### 1.1 User (core identity)
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `userId` | `string` (UUID) | yes | Unique identifier for the user. |
+| `displayName` | `string` | yes | The user's display name. |
+| `email` | `string` | yes | The user's email address (account identifier, not auth). |
+| `createdAt` | `Date` | yes | Account creation timestamp. |
+| `updatedAt` | `Date` | yes | Last profile update timestamp. |
+| `lastActiveAt` | `Date` | yes | Last conversation activity timestamp. |
+
+### 1.2 UserLearningProfile
+
+One-to-one with User. Captures language learning context used to personalize AI conversations.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `userId` | `string` (UUID) | yes | FK → User. |
+| `learningLevel` | `enum` (A1, A2, B1, B2, C1, C2) | yes | CEFR proficiency level. |
+| `nativeLanguage` | `string` | yes | The user's native language, so the AI can tailor explanations. |
+| `learningGoals` | `enum[]` (`travel`, `work`, `academic`, `immigration`, `hobby`) | no | Why the user is learning German. |
+| `correctionStyle` | `enum` (`gentle`, `moderate`, `strict`) | yes | How aggressively the AI corrects mistakes. Default: `moderate`. |
+| `topicsOfInterest` | `string[]` | no | Preferred conversation topics (e.g. "cooking", "technology"). |
+
+### 1.3 UserUsageStats
+
+One-to-one with User. Denormalized usage statistics updated after each conversation.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `userId` | `string` (UUID) | yes | FK → User. |
+| `totalConversationCount` | `int` | yes | Number of completed conversations. Default: 0. |
+| `totalPracticeMinutes` | `int` | yes | Cumulative practice time in minutes. Default: 0. |
+| `currentStreak` | `int` | yes | Consecutive days with at least one conversation. Default: 0. |
+| `longestStreak` | `int` | yes | All-time best streak. Default: 0. |
+
+### 1.4 UserPreferences
+
+One-to-one with User. Non-learning settings.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `userId` | `string` (UUID) | yes | FK → User. |
+| `timezone` | `string` | yes | IANA timezone (e.g. `Europe/Berlin`). Used for streak calculation. |
+| `uiLanguage` | `string` | yes | Language for non-AI UI text. Default: `en`. |
+
+### 1.5 MagicLinkToken
+
+Single-use token for passwordless email authentication. Token value is hashed before storage.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tokenId` | `string` (UUID) | yes | Unique identifier. |
+| `email` | `string` | yes | Email address the link was sent to. |
+| `tokenHash` | `string` | yes | SHA-256 hash of the token sent in the email. |
+| `expiresAt` | `Date` | yes | Token expiry (15 minutes from creation). |
+| `usedAt` | `Date` | no | Timestamp when token was consumed. Null if unused. |
+| `createdAt` | `Date` | yes | Creation timestamp. |
+
+### 1.6 UserPasskey
+
+WebAuthn credential for passkey-based login. One-to-many with User (multiple devices).
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `passkeyId` | `string` (UUID) | yes | Unique identifier. |
+| `userId` | `string` (UUID) | yes | FK → User. |
+| `credentialId` | `string` | yes | WebAuthn credential ID (base64url-encoded). |
+| `publicKey` | `string` | yes | COSE public key (base64url-encoded). |
+| `counter` | `int` | yes | Signature counter for clone detection. |
+| `deviceName` | `string` | no | User-provided label (e.g. "My Phone"). |
+| `createdAt` | `Date` | yes | Registration timestamp. |
+| `lastUsedAt` | `Date` | yes | Last successful authentication timestamp. |
+
+### 1.7 RefreshToken
+
+JWT refresh token stored hashed for rotation and revocation.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tokenId` | `string` (UUID) | yes | Unique identifier. |
+| `userId` | `string` (UUID) | yes | FK → User. |
+| `tokenHash` | `string` | yes | SHA-256 hash of the refresh token. |
+| `expiresAt` | `Date` | yes | Token expiry (7 days from creation). |
+| `revokedAt` | `Date` | no | Timestamp when token was revoked. Null if active. |
+| `createdAt` | `Date` | yes | Creation timestamp. |
 
 ## 2. Conversation
 
