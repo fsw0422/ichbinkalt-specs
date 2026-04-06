@@ -74,8 +74,8 @@ infra/
     └── accounts/
         ├── dev/
         │   ├── account.hcl             # dev AWS account ID + common locals
-        │   └── us-east-1/
-        │       ├── region.hcl          # Region locals (aws_region = "us-east-1")
+        │   └── eu-west-1/
+        │       ├── region.hcl          # Region locals (aws_region = "eu-west-1")
         │       ├── vpc/
         │       │   └── terragrunt.hcl  # inputs: CIDR, AZs
         │       ├── ecr/
@@ -90,7 +90,7 @@ infra/
         │           └── terragrunt.hcl  # dependency: vpc, ecr, rds, dynamodb, secrets-manager
         ├── staging/
         │   ├── account.hcl
-        │   └── us-east-1/
+        │   └── eu-west-1/
         │       ├── region.hcl
         │       ├── vpc/
         │       │   └── terragrunt.hcl
@@ -105,7 +105,7 @@ infra/
         │       └── ecs/
         │           └── terragrunt.hcl
             ├── account.hcl
-            └── us-east-1/
+            └── eu-west-1/
                 ├── region.hcl
                 ├── vpc/
                 │   └── terragrunt.hcl
@@ -127,8 +127,8 @@ infra/
 - **`account.hcl`**: Plain HCL file (not a Terragrunt config) declaring the AWS account ID and account name as locals. Read by child `terragrunt.hcl` files via `read_terragrunt_config(find_in_parent_folders("account.hcl"))`.
 - **`region.hcl`**: Declares the region local. Combined with `account.hcl`, provides all context needed to construct unique resource names and state paths without repetition.
 - **Per-module `terragrunt.hcl`**: Each leaf file declares `terraform { source = "../../../../modules/rds" }`, a `dependency` block for cross-module outputs (e.g., `ecs` reads the DynamoDB table ARN from the `dynamodb` dependency), and `inputs` with environment-specific values. No `main.tf`, `variables.tf`, or `terraform.tfvars` files needed in the accounts tree.
-- **`terragrunt run-all apply`**: Running this from `accounts/prod/us-east-1/` applies all modules in dependency order (vpc → ecr/rds/dynamodb → ecs) in a single command.
-- **Adding a region**: Create `accounts/prod/us-west-2/` with the same module subdirectories and updated `region.hcl` — no module code changes.
+- **`terragrunt run-all apply`**: Running this from `accounts/prod/eu-west-1/` applies all modules in dependency order (vpc → ecr/rds/dynamodb → ecs) in a single command.
+- **Adding a region**: Create `accounts/prod/us-east-1/` with the same module subdirectories and updated `region.hcl` — no module code changes.
 
 **IAM**: No separate IAM module. The `ecs/` module defines the ECS Task Execution Role and Task Role internally, accepting a `task_role_extra_policy_arns` variable. The `ecs/terragrunt.hcl` reads the DynamoDB table ARN from its `dependency.dynamodb.outputs.table_arn` and passes a constructed policy ARN into that variable. The ECS Task Execution Role also receives `secretsmanager:GetSecretValue` permission on the Secrets Manager secret ARN (from `dependency.secrets-manager.outputs.secret_arn`) so that ECS can inject secrets at container start. Policies stay close to the resources they govern.
 
