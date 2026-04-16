@@ -12,4 +12,5 @@ This repository manages specs across all services (frontend, backend, infra, etc
 
 - `<workspace-root>/.github/prompts/` — Speckit AI prompt workflows for authoring and refining specs
 - `<workspace-root>/.specify/` — Speckit tooling: scripts, templates, and memory
-- `ichbinkalt-specs/` — this repository; contains per-feature spec branches/worktrees
+- `ichbinkalt-specs-<feature-id>/` — per-feature spec worktree corresponding to the implementation worktree, for example `ichbinkalt-backend-<feature-id>/`
+- `specs/<feature-id>/` — feature documents for that worktree, including the spec, plan, tasks, and contracts

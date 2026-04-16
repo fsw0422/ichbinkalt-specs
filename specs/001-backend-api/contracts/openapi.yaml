@@ -1,0 +1,620 @@
+openapi: 3.1.0
+info:
+  title: AI Conversation API
+  version: 1.0.0
+  description: API for real-time audio-based conversations with a German-learning AI. Backend handles STT via Gemini Live API's native transcription. Audio responses are also provided by Gemini Live.
+
+paths:
+  /api/v1/conversations:
+    post:
+      summary: Start a new conversation
+      operationId: start_conversation
+      responses:
+        '201':
+          description: Conversation created successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation_id:
+                    type: string
+                    format: uuid
+                    description: The unique identifier for the conversation session.
+                  websocket_url:
+                    type: string
+                    format: uri
+                    description: The URL for the WebSocket connection.
+
+  /ws/v1/conversations/{conversation_id}:
+    get:
+      summary: WebSocket connection for an active conversation
+      description: This endpoint is not a standard HTTP endpoint but represents the WebSocket connection.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '101':
+          description: Switching protocols to WebSocket.
+
+  /api/v1/users/{userId}:
+    get:
+      summary: Get full user profile
+      operationId: get_user
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Full user profile with nested learning profile, usage stats, and preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullUserResponse'
+        '404':
+          description: User not found.
+    put:
+      summary: Update user core identity
+      operationId: update_user
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FullUserResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/users/{userId}/learning-profile:
+    put:
+      summary: Create or update user's learning profile
+      operationId: update_learning_profile
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLearningProfileRequest'
+      responses:
+        '200':
+          description: Learning profile updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserLearningProfileResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/users/{userId}/preferences:
+    put:
+      summary: Create or update user's preferences
+      operationId: update_preferences
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Preferences updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferencesResponse'
+        '404':
+          description: User not found.
+
+  /api/v1/auth/magic-link:
+    post:
+      summary: Request a magic link
+      description: Creates or reuses a shadow account for first-time emails, then sends a magic link without revealing whether the email already exists.
+      operationId: request_magic_link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+      responses:
+        '200':
+          description: Magic link sent to email (response is always 200 to prevent email enumeration).
+        '429':
+          description: Rate limit exceeded (5 requests per email per hour).
+
+  /api/v1/auth/verify-magic-link:
+    post:
+      summary: Verify an emailed auth token
+      description: Verifies the email for the existing shadow or full user, updates the verification timestamp, and returns session tokens. If the user has no passkeys, or if the token was issued for passkey recovery, the client must proceed directly to passkey registration.
+      operationId: verify_magic_link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyMagicLinkRequest'
+      responses:
+        '200':
+          description: Token verified. Returns JWT tokens and user info.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Token is invalid, expired, or already used.
+
+  /api/v1/auth/passkeys/registration-options:
+    post:
+      summary: Get WebAuthn registration challenge options
+      description: Used during first-time shadow-account onboarding to complete mandatory initial passkey registration.
+      operationId: get_passkey_registration_options
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: WebAuthn registration options.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasskeyRegistrationOptions'
+
+  /api/v1/auth/passkeys/register:
+    post:
+      summary: Register a passkey credential
+      description: Completes mandatory initial passkey registration for a newly verified shadow account or adds another passkey for an existing user.
+      operationId: register_passkey
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyRegistrationCredential'
+      responses:
+        '201':
+          description: Passkey registered successfully.
+        '400':
+          description: Invalid credential.
+
+  /api/v1/auth/passkeys/recovery-link:
+    post:
+      summary: Request a passkey recovery email
+      description: Sends a single-use recovery email link to the user. After the token is verified, the client should route directly into passkey registration.
+      operationId: request_passkey_recovery_link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MagicLinkRequest'
+      responses:
+        '200':
+          description: Passkey recovery email sent (response is always 200 to prevent email enumeration).
+        '429':
+          description: Rate limit exceeded.
+
+  /api/v1/auth/passkeys/authentication-options:
+    post:
+      summary: Get WebAuthn authentication challenge options
+      description: Returns passkey authentication options for an allowed email-verified authentication flow. Explicit logout still requires a fresh magic-link verification before the next app login.
+      operationId: get_passkey_authentication_options
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyAuthenticationOptionsRequest'
+      responses:
+        '200':
+          description: WebAuthn authentication options.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasskeyAuthenticationOptions'
+
+  /api/v1/auth/passkeys/authenticate:
+    post:
+      summary: Authenticate with a passkey
+      description: Verifies a passkey assertion and returns session tokens when used in an allowed email-verified authentication flow. Explicit logout still requires a fresh magic-link verification before the next app login.
+      operationId: authenticate_passkey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyAuthenticationCredential'
+      responses:
+        '200':
+          description: Authentication successful. Returns JWT tokens.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid passkey assertion.
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh access token
+      operationId: refresh_token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: New tokens issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Refresh token is invalid, expired, or revoked.
+
+  /api/v1/auth/logout:
+    post:
+      summary: Logout and revoke refresh token
+      description: Revokes the current refresh token. Any later login must start with a new magic-link email verification, even if the user has registered passkeys.
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Refresh token revoked.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # ---- User API Schemas ----
+    AccountState:
+      type: string
+      enum: [shadow, full]
+      description: Shadow accounts can use the app pre-paywall and are later promoted to full without creating a second user record.
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+        - displayName
+
+    FullUserResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        accountState:
+          $ref: '#/components/schemas/AccountState'
+        displayName:
+          type: string
+        email:
+          type: string
+          format: email
+        emailVerifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        promotedAt:
+          type: string
+          format: date-time
+          nullable: true
+        learningProfile:
+          $ref: '#/components/schemas/UserLearningProfileResponse'
+        usageStats:
+          $ref: '#/components/schemas/UserUsageStatsResponse'
+        preferences:
+          $ref: '#/components/schemas/UserPreferencesResponse'
+
+    UpdateLearningProfileRequest:
+      type: object
+      properties:
+        learningLevel:
+          type: string
+          enum: [A1, A2, B1, B2, C1, C2]
+        nativeLanguage:
+          type: string
+          minLength: 1
+          maxLength: 100
+        learningGoals:
+          type: array
+          items:
+            type: string
+            enum: [travel, work, academic, immigration, hobby]
+        correctionStyle:
+          type: string
+          enum: [gentle, moderate, strict]
+        topicsOfInterest:
+          type: array
+          items:
+            type: string
+      required:
+        - learningLevel
+        - nativeLanguage
+        - correctionStyle
+
+    UserLearningProfileResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        learningLevel:
+          type: string
+          enum: [A1, A2, B1, B2, C1, C2]
+        nativeLanguage:
+          type: string
+        learningGoals:
+          type: array
+          items:
+            type: string
+            enum: [travel, work, academic, immigration, hobby]
+        correctionStyle:
+          type: string
+          enum: [gentle, moderate, strict]
+        topicsOfInterest:
+          type: array
+          items:
+            type: string
+
+    UserUsageStatsResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        totalConversationCount:
+          type: integer
+        totalPracticeMinutes:
+          type: integer
+        currentStreak:
+          type: integer
+        longestStreak:
+          type: integer
+
+    UpdatePreferencesRequest:
+      type: object
+      properties:
+        timezone:
+          type: string
+          description: IANA timezone identifier (e.g. Europe/Berlin)
+          maxLength: 100
+        uiLanguage:
+          type: string
+          description: UI language code (e.g. en, de, ko)
+          maxLength: 10
+      required:
+        - timezone
+        - uiLanguage
+
+    UserPreferencesResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        timezone:
+          type: string
+        uiLanguage:
+          type: string
+
+    # ---- Auth Schemas ----
+    MagicLinkRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    VerifyMagicLinkRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The emailed auth token from a sign-in or passkey-recovery URL.
+      required:
+        - token
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token (15 min expiry).
+        refreshToken:
+          type: string
+          description: Refresh token (7 day expiry).
+        userId:
+          type: string
+          format: uuid
+        accountState:
+          $ref: '#/components/schemas/AccountState'
+        passkeyRegistrationRequired:
+          type: boolean
+          description: True if the client must route directly to passkey registration, either because the user has no registered passkeys or because the verified token was issued for passkey recovery.
+
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required:
+        - refreshToken
+
+    PasskeyRegistrationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialCreationOptions (structure defined by WebAuthn spec).
+
+    PasskeyRegistrationCredential:
+      type: object
+      description: WebAuthn registration response from navigator.credentials.create() (structure defined by WebAuthn spec).
+
+    PasskeyAuthenticationOptionsRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+
+    PasskeyAuthenticationOptions:
+      type: object
+      description: WebAuthn PublicKeyCredentialRequestOptions (structure defined by WebAuthn spec).
+
+    PasskeyAuthenticationCredential:
+      type: object
+      description: WebAuthn authentication response from navigator.credentials.get() (structure defined by WebAuthn spec).
+
+    # ---- WebSocket Message Schemas ----
+    ClientMessage:
+      oneOf:
+        - $ref: '#/components/schemas/AudioChunk'
+        - $ref: '#/components/schemas/AudioStreamEnd'
+        - $ref: '#/components/schemas/TerminateSession'
+
+    ServerMessage:
+      oneOf:
+        - $ref: '#/components/schemas/InputTranscription'
+        - $ref: '#/components/schemas/OutputTranscription'
+        - $ref: '#/components/schemas/AIAudioResponse'
+
+    AudioChunk:
+      type: object
+      description: Audio data chunk sent from client to server (PCM format, base64 encoded).
+      properties:
+        event:
+          type: string
+          enum: [audio_chunk]
+        audio:
+          type: string
+          format: byte
+          description: Base64-encoded PCM audio data (16kHz, 16-bit, mono).
+      required:
+        - event
+        - audio
+
+    AudioStreamEnd:
+      type: object
+      description: Signal that the audio stream has ended (e.g., user stopped speaking).
+      properties:
+        event:
+          type: string
+          enum: [audio_stream_end]
+      required:
+        - event
+
+    TerminateSession:
+      type: object
+      properties:
+        event:
+          type: string
+          enum: [terminate_session]
+
+    InputTranscription:
+      type: object
+      description: Transcription of user's audio input, provided by Gemini Live's inputAudioTranscription feature.
+      properties:
+        event:
+          type: string
+          enum: [input_transcription]
+        text:
+          type: string
+          description: The transcribed text from the user's audio input.
+        conversationId:
+          type: string
+          format: uuid
+          description: The conversation this transcription belongs to.
+      required:
+        - event
+        - text
+        - conversationId
+
+    OutputTranscription:
+      type: object
+      description: Transcription of AI's audio output, provided by Gemini Live's outputAudioTranscription feature.
+      properties:
+        event:
+          type: string
+          enum: [output_transcription]
+        text:
+          type: string
+          description: The transcribed text of the AI's spoken response.
+        conversationId:
+          type: string
+          format: uuid
+          description: The conversation this transcription belongs to.
+      required:
+        - event
+        - text
+        - conversationId
+
+    AIAudioResponse:
+      type: object
+      description: AI's audio response in PCM format, generated by Gemini Live's native audio model.
+      properties:
+        event:
+          type: string
+          enum: [ai_audio_response]
+        audioData:
+          type: string
+          format: byte
+          description: Base64-encoded PCM audio data (24kHz, 16-bit, mono).
+        mimeType:
+          type: string
+          description: The MIME type of the audio data (e.g., audio/pcm).
+      required:
+        - event
+        - audioData
+        - mimeType
