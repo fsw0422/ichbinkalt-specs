@@ -31,21 +31,21 @@
 
 ### Terraform Modules
 
- - [ ] T201 [P] Create infra/aws/modules/vpc/ module (VPC, public/private subnets across AZs, route tables, IGW, NAT gateway) with variables.tf, main.tf, outputs.tf
- - [ ] T202 [P] Create infra/aws/modules/ecr/ module (ECR repository with lifecycle policy) with variables.tf, main.tf, outputs.tf
- - [ ] T204 [P] Create infra/aws/modules/dynamodb/ module (single DynamoDB table `ichbinkalt` with pk/sk string keys, PK markers `A#`, `B#`, `C#`, SK markers `A`, `B#`, `C#`, sequential alphabet attribute names `A`, `B`, ... `Z`, `AA`, ..., GSIs on `AA` and `B`, TTL on `AB`, and support for user/email lookup-item patterns; outputs table ARN) with variables.tf, main.tf, outputs.tf
- - [ ] T205 [P] Create infra/aws/modules/secrets-manager/ module (Secrets Manager secrets for JWT signing key; outputs secret ARNs) with variables.tf, main.tf, outputs.tf
- - [ ] T206 [P] Create infra/aws/modules/alb/ module (Application Load Balancer, HTTPS listener, target group, security group) with variables.tf, main.tf, outputs.tf
- - [ ] T207 Create infra/aws/modules/ecs/ module (ECS Fargate cluster, task definition, service, Task Execution Role with secretsmanager:GetSecretValue, Task Role with DynamoDB access via task_role_extra_policy_arns variable) with variables.tf, main.tf, outputs.tf (depends on T201-T206 for input/output variable alignment)
+ - [x] T201 [P] Create infra/aws/modules/vpc/ module (VPC, public/private subnets across AZs, route tables, IGW, NAT gateway) with variables.tf, main.tf, outputs.tf
+ - [x] T202 [P] Create infra/aws/modules/ecr/ module (ECR repository with lifecycle policy) with variables.tf, main.tf, outputs.tf
+ - [x] T204 [P] Create infra/aws/modules/dynamodb/ module (single DynamoDB table `ichbinkalt` with pk/sk string keys, PK markers `A#`, `B#`, `C#`, SK markers `A`, `B#`, `C#`, sequential alphabet attribute names `A`, `B`, ... `Z`, `AA`, ..., GSIs on `AA` and `B`, TTL on `AB`, and support for user/email lookup-item patterns; outputs table ARN) with variables.tf, main.tf, outputs.tf
+ - [x] T205 [P] Create infra/aws/modules/secrets-manager/ module (Secrets Manager secrets for JWT signing key; outputs secret ARNs) with variables.tf, main.tf, outputs.tf
+ - [x] T206 [P] Create infra/aws/modules/alb/ module (Application Load Balancer, HTTPS listener, target group, security group) with variables.tf, main.tf, outputs.tf
+ - [x] T207 Create infra/aws/modules/ecs/ module (ECS Fargate cluster, task definition, service, Task Execution Role with secretsmanager:GetSecretValue, Task Role with DynamoDB access via task_role_extra_policy_arns variable) with variables.tf, main.tf, outputs.tf (depends on T201-T206 for input/output variable alignment)
 
 ### Prod Environment Terragrunt Configuration
 
  - [ ] T208 [P] Create infra/aws/accounts/prod/account.hcl with prod AWS account ID and account name locals
- - [ ] T209 [P] Create infra/aws/accounts/prod/eu-west-1/region.hcl with region locals (aws_region = "eu-west-1")
- - [ ] T210 [P] Create infra/aws/accounts/prod/eu-west-1/vpc/terragrunt.hcl with CIDR and AZ inputs, source = modules/vpc
- - [ ] T211 [P] Create infra/aws/accounts/prod/eu-west-1/ecr/terragrunt.hcl with source = modules/ecr
- - [ ] T213 [P] Create infra/aws/accounts/prod/eu-west-1/dynamodb/terragrunt.hcl with table name, GSI, and TTL attr `AB` inputs
- - [ ] T214 [P] Create infra/aws/accounts/prod/eu-west-1/secrets-manager/terragrunt.hcl with secret name inputs (JWT key)
+ - [x] T209 [P] Create infra/aws/accounts/prod/eu-west-1/region.hcl with region locals (aws_region = "eu-west-1")
+ - [x] T210 [P] Create infra/aws/accounts/prod/eu-west-1/vpc/terragrunt.hcl with CIDR and AZ inputs, source = modules/vpc
+ - [x] T211 [P] Create infra/aws/accounts/prod/eu-west-1/ecr/terragrunt.hcl with source = modules/ecr
+ - [x] T213 [P] Create infra/aws/accounts/prod/eu-west-1/dynamodb/terragrunt.hcl with table name, GSI, and TTL attr `AB` inputs
+ - [x] T214 [P] Create infra/aws/accounts/prod/eu-west-1/secrets-manager/terragrunt.hcl with secret name inputs (JWT key)
  - [ ] T215 Create infra/aws/accounts/prod/eu-west-1/ecs/terragrunt.hcl with dependencies on vpc, ecr, dynamodb, secrets-manager, and environment-specific inputs (depends on T210-T211, T213-T214)
 
 **Checkpoint**: Prod environment infrastructure definition complete. `terragrunt run-all apply` from accounts/prod/eu-west-1/ provisions the full stack in dependency order (vpc → ecr/dynamodb/secrets-manager → ecs). Dev and staging directory structures are kept but not deployed for now.
