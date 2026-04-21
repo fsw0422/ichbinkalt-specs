@@ -49,7 +49,7 @@ paths:
         - $ref: '#/components/parameters/userId'
       responses:
         '200':
-          description: Full user profile with nested learning profile, usage stats, and preferences.
+          description: Full user profile assembled from the user core, learning profile, usage stats, and preferences.
           content:
             application/json:
               schema:
@@ -121,51 +121,17 @@ paths:
         '404':
           description: User not found.
 
-  /api/v1/auth/magic-link:
-    post:
-      summary: Request a magic link
-      description: Creates or reuses a shadow account for first-time emails, then sends a magic link without revealing whether the email already exists.
-      operationId: request_magic_link
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MagicLinkRequest'
-      responses:
-        '200':
-          description: Magic link sent to email (response is always 200 to prevent email enumeration).
-        '429':
-          description: Rate limit exceeded (5 requests per email per hour).
-
-  /api/v1/auth/verify-magic-link:
-    post:
-      summary: Verify an emailed auth token
-      description: Verifies the email for the existing shadow or full user, updates the verification timestamp, and returns session tokens. If the user has no passkeys, or if the token was issued for passkey recovery, the client must proceed directly to passkey registration.
-      operationId: verify_magic_link
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/VerifyMagicLinkRequest'
-      responses:
-        '200':
-          description: Token verified. Returns JWT tokens and user info.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        '401':
-          description: Token is invalid, expired, or already used.
-
   /api/v1/auth/passkeys/registration-options:
     post:
-      summary: Get WebAuthn registration challenge options
-      description: Used during first-time shadow-account onboarding to complete mandatory initial passkey registration.
-      operationId: get_passkey_registration_options
-      security:
-        - bearerAuth: []
+      summary: Get WebAuthn registration challenge options for sign-up
+      description: Creates or resumes the single account bound to the normalized email and returns WebAuthn registration options immediately for first-passkey registration.
+      operationId: get_initial_passkey_registration_options
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyRegistrationOptionsRequest'
       responses:
         '200':
           description: WebAuthn registration options.
@@ -173,12 +139,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PasskeyRegistrationOptions'
+        '409':
+          description: The normalized email already belongs to an account with a registered passkey. Use passkey authentication or recovery instead.
 
   /api/v1/auth/passkeys/register:
     post:
-      summary: Register a passkey credential
-      description: Completes mandatory initial passkey registration for a newly verified shadow account or adds another passkey for an existing user.
-      operationId: register_passkey
+      summary: Register the first passkey and issue a session
+      description: Completes initial passkey-first sign-up for the unique email-bound account and returns full session tokens. Email verification is a separate later flow.
+      operationId: register_initial_passkey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyRegistrationRequest'
+      responses:
+        '201':
+          description: Passkey registered successfully. Returns JWT tokens for the new application session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid credential.
+        '409':
+          description: The normalized email already belongs to an account with a registered passkey. Use passkey authentication or recovery instead.
+
+  /api/v1/auth/email-verification-link:
+    post:
+      summary: Request an email-verification link
+      description: Sends a single-use inbox-verification email for the signed-in user's unique email address. Successful verification later marks `emailConfirmed = true` and unlocks subscription-based services.
+      operationId: request_email_verification_link
       security:
         - bearerAuth: []
       requestBody:
@@ -186,34 +177,120 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PasskeyRegistrationCredential'
+              $ref: '#/components/schemas/EmailAddressRequest'
       responses:
-        '201':
-          description: Passkey registered successfully.
-        '400':
-          description: Invalid credential.
+        '200':
+          description: Email-verification link sent.
+        '401':
+          description: Missing or invalid access token.
+        '429':
+          description: Rate limit exceeded (5 requests per email per hour).
+
+  /api/v1/auth/verify-email:
+    post:
+      summary: Verify inbox ownership for subscription enablement
+      description: Verifies a single-use email-verification token, marks `emailConfirmed = true` on the corresponding user, and returns the updated verification state.
+      operationId: verify_email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyEmailTokenRequest'
+      responses:
+        '200':
+          description: Email verified successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmailVerificationResponse'
+        '401':
+          description: Token is invalid, expired, or already used.
 
   /api/v1/auth/passkeys/recovery-link:
     post:
-      summary: Request a passkey recovery email
-      description: Sends a single-use recovery email link to the user. After the token is verified, the client should route directly into passkey registration.
+      summary: Request a passkey recovery or account reclaim email
+      description: Sends a single-use recovery email link to the single account bound to the normalized email. The same entrypoint may be surfaced in client UX as `Forgot Password?`. After the token is verified, the client receives a recovery bootstrap token and routes directly into passkey re-registration.
       operationId: request_passkey_recovery_link
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MagicLinkRequest'
+              $ref: '#/components/schemas/EmailAddressRequest'
       responses:
         '200':
-          description: Passkey recovery email sent (response is always 200 to prevent email enumeration).
+          description: Passkey recovery or account reclaim email sent (response is always 200 to prevent email enumeration).
         '429':
           description: Rate limit exceeded.
+
+  /api/v1/auth/passkeys/verify-recovery:
+    post:
+      summary: Verify a passkey recovery email link
+      description: Verifies a recovery token, auto-confirms the email, revokes stale passkeys and refresh tokens when reclaim is needed, and returns a scoped bootstrap token that only authorizes passkey re-registration.
+      operationId: verify_passkey_recovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRecoveryTokenRequest'
+      responses:
+        '200':
+          description: Recovery token verified. Returns a scoped bootstrap token for passkey re-registration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapAuthResponse'
+        '401':
+          description: Token is invalid, expired, or already used.
+
+  /api/v1/auth/passkeys/re-registration-options:
+    post:
+      summary: Get WebAuthn re-registration challenge options
+      description: Used during passkey recovery or account reclaim after recovery verification to complete replacement passkey registration.
+      operationId: get_passkey_reregistration_options
+      security:
+        - bootstrapAuth: []
+      responses:
+        '200':
+          description: WebAuthn registration options for replacement passkey registration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasskeyRegistrationOptions'
+        '401':
+          description: Missing, expired, or invalid recovery bootstrap token.
+
+  /api/v1/auth/passkeys/re-register:
+    post:
+      summary: Register a replacement passkey
+      description: Completes recovery-backed passkey replacement and returns a new application session. Recovery verification already confirmed inbox ownership.
+      operationId: reregister_passkey
+      security:
+        - bootstrapAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasskeyReRegistrationRequest'
+      responses:
+        '201':
+          description: Replacement passkey registered successfully. Returns JWT tokens for the new application session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid credential.
+        '401':
+          description: Missing, expired, or invalid recovery bootstrap token.
 
   /api/v1/auth/passkeys/authentication-options:
     post:
       summary: Get WebAuthn authentication challenge options
-      description: Returns passkey authentication options for an allowed email-verified authentication flow. Explicit logout still requires a fresh magic-link verification before the next app login.
+      description: Returns passkey authentication options for a returning user with a registered passkey.
       operationId: get_passkey_authentication_options
       requestBody:
         required: true
@@ -232,7 +309,7 @@ paths:
   /api/v1/auth/passkeys/authenticate:
     post:
       summary: Authenticate with a passkey
-      description: Verifies a passkey assertion and returns session tokens when used in an allowed email-verified authentication flow. Explicit logout still requires a fresh magic-link verification before the next app login.
+      description: Verifies a passkey assertion and returns session tokens for a returning user.
       operationId: authenticate_passkey
       requestBody:
         required: true
@@ -273,7 +350,7 @@ paths:
   /api/v1/auth/logout:
     post:
       summary: Logout and revoke refresh token
-      description: Revokes the current refresh token. Any later login must start with a new magic-link email verification, even if the user has registered passkeys.
+      description: Revokes the current refresh token. Any later login should use passkey authentication, or the recovery/account-reclaim flow if credentials are lost or inbox ownership must be re-established.
       operationId: logout
       requestBody:
         required: true
@@ -291,6 +368,12 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: Access bearer token containing identity and verified-session facts. Mutable lifecycle and entitlement checks are enforced against current server-side data.
+    bootstrapAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Scoped bootstrap bearer token returned by passkey recovery verification and limited to passkey re-registration endpoints.
 
   parameters:
     userId:
@@ -299,14 +382,24 @@ components:
       required: true
       schema:
         type: string
-        format: uuid
+        description: ULID user identifier.
 
   schemas:
     # ---- User API Schemas ----
-    AccountState:
+    AccountStatus:
       type: string
-      enum: [shadow, full]
-      description: Shadow accounts can use the app pre-paywall and are later promoted to full without creating a second user record.
+      enum: [active, suspended]
+      description: Hard lifecycle state used for server-side authorization checks.
+
+    SubscriptionStatus:
+      type: string
+      enum: [free, trial, paid, grace, past_due]
+      description: Product-access state used for billing and entitlement checks. Paid or upgraded states additionally require verified email ownership.
+
+    BootstrapPurpose:
+      type: string
+      enum: [passkey_recovery]
+      description: Indicates that the bootstrap flow comes from passkey recovery or account reclaim.
 
     UpdateUserRequest:
       type: object
@@ -323,18 +416,23 @@ components:
       properties:
         userId:
           type: string
-          format: uuid
-        accountState:
-          $ref: '#/components/schemas/AccountState'
+          description: ULID user identifier.
+        emailConfirmed:
+          type: boolean
+          description: Durable inbox-ownership proof for the account. Paid services and upgrades require this to be true.
+        accountStatus:
+          $ref: '#/components/schemas/AccountStatus'
+        onboardingComplete:
+          type: boolean
+          description: True when the user currently has at least one registered passkey.
+        subscriptionStatus:
+          $ref: '#/components/schemas/SubscriptionStatus'
         displayName:
           type: string
         email:
           type: string
           format: email
-        emailVerifiedAt:
-          type: string
-          format: date-time
-          nullable: true
+          description: Unique account email address. Matching is case-insensitive after trimming and lowercasing.
         createdAt:
           type: string
           format: date-time
@@ -344,10 +442,6 @@ components:
         lastActiveAt:
           type: string
           format: date-time
-        promotedAt:
-          type: string
-          format: date-time
-          nullable: true
         learningProfile:
           $ref: '#/components/schemas/UserLearningProfileResponse'
         usageStats:
@@ -387,7 +481,7 @@ components:
       properties:
         userId:
           type: string
-          format: uuid
+          description: ULID user identifier.
         learningLevel:
           type: string
           enum: [A1, A2, B1, B2, C1, C2]
@@ -411,7 +505,7 @@ components:
       properties:
         userId:
           type: string
-          format: uuid
+          description: ULID user identifier.
         totalConversationCount:
           type: integer
         totalPracticeMinutes:
@@ -441,28 +535,38 @@ components:
       properties:
         userId:
           type: string
-          format: uuid
+          description: ULID user identifier.
         timezone:
           type: string
         uiLanguage:
           type: string
 
     # ---- Auth Schemas ----
-    MagicLinkRequest:
+    EmailAddressRequest:
       type: object
       properties:
         email:
           type: string
           format: email
+          description: Unique account email address. Matching and uniqueness use trimmed lowercase normalization.
       required:
         - email
 
-    VerifyMagicLinkRequest:
+    VerifyEmailTokenRequest:
       type: object
       properties:
         token:
           type: string
-          description: The emailed auth token from a sign-in or passkey-recovery URL.
+          description: The emailed token from an inbox-verification URL.
+      required:
+        - token
+
+    VerifyRecoveryTokenRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The emailed token from a passkey-recovery URL.
       required:
         - token
 
@@ -471,18 +575,82 @@ components:
       properties:
         accessToken:
           type: string
-          description: JWT access token (15 min expiry).
+          description: JWT access token (15 min expiry) containing identity and verified-session facts only.
         refreshToken:
           type: string
           description: Refresh token (7 day expiry).
         userId:
           type: string
-          format: uuid
-        accountState:
-          $ref: '#/components/schemas/AccountState'
+          description: ULID user identifier.
+        accountStatus:
+          $ref: '#/components/schemas/AccountStatus'
+        onboardingComplete:
+          type: boolean
+          description: True when the user currently has at least one registered passkey.
+        subscriptionStatus:
+          $ref: '#/components/schemas/SubscriptionStatus'
+
+    EmailVerificationResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          description: ULID user identifier.
+        emailConfirmed:
+          type: boolean
+          description: Always true after successful email verification.
+
+    BootstrapAuthResponse:
+      type: object
+      properties:
+        bootstrapToken:
+          type: string
+          description: Scoped bootstrap bearer token used only for passkey re-registration endpoints. Recommended claims are `sub`, `jti`, `tokenType = bootstrap`, `purpose = passkey_recovery`, `scope = passkey_registration`, and `exp`.
+        userId:
+          type: string
+          description: ULID user identifier.
+        purpose:
+          $ref: '#/components/schemas/BootstrapPurpose'
         passkeyRegistrationRequired:
           type: boolean
-          description: True if the client must route directly to passkey registration, either because the user has no registered passkeys or because the verified token was issued for passkey recovery.
+          description: Always true for a verified recovery or account-reclaim bootstrap flow so the client can route directly into passkey re-registration.
+
+    PasskeyRegistrationOptionsRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: Unique account email address. Matching and uniqueness use trimmed lowercase normalization.
+      required:
+        - email
+
+    PasskeyRegistrationRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: Unique account email address. Matching and uniqueness use trimmed lowercase normalization.
+        credential:
+          $ref: '#/components/schemas/PasskeyRegistrationCredential'
+        deviceName:
+          type: string
+          description: Optional user-visible label for the passkey device.
+      required:
+        - email
+        - credential
+
+    PasskeyReRegistrationRequest:
+      type: object
+      properties:
+        credential:
+          $ref: '#/components/schemas/PasskeyRegistrationCredential'
+        deviceName:
+          type: string
+          description: Optional user-visible label for the replacement passkey device.
+      required:
+        - credential
 
     RefreshTokenRequest:
       type: object
@@ -506,6 +674,7 @@ components:
         email:
           type: string
           format: email
+          description: Unique account email address. Matching is case-insensitive after trimming and lowercasing.
       required:
         - email
 

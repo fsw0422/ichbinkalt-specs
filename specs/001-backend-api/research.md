@@ -114,126 +114,48 @@ This allows clients to retrieve the full conversation transcript for review and 
 
 ## 4. Cloud Provider Selection
 
-This section evaluates which cloud provider is most cost-effective for this project while providing comparable quality and service breadth. The project requires: container hosting (with WebSocket support for real-time audio), managed PostgreSQL, a key-value store with TTL for auth tokens, a load balancer, and a container registry.
+The earlier provider comparison assumed a managed PostgreSQL dependency. That is no longer the current architecture. The current scope uses:
 
-### 4.1 Requirements Specific to This Project
+- container hosting with WebSocket support for Gemini Live sessions,
+- a single DynamoDB table for user/auth state,
+- Secrets Manager for JWT signing material,
+- a container registry,
+- Terraform/Terragrunt-managed AWS infrastructure.
+
+### 4.1 Current Requirements Specific to This Project
 
 | Requirement | Why |
 |---|---|
-| **WebSocket support** | Real-time bidirectional audio streaming (Gemini Live). Connections last up to 5 minutes per session. Eliminates pure request-based serverless options unless they support long-lived connections. |
-| **Managed PostgreSQL** | Relational data store for profiles, conversations, messages. |
-| **Key-value store with TTL** | Auth domain data (users, passkeys, magic links, refresh tokens). Needs auto-expiry for tokens. |
-| **Container hosting** | NestJS app in Docker. Single service, not microservices. |
-| **Terraform support** | IaC is already decided. All major clouds supported. |
-| **Gemini API** | Google's API, but accessed via API key over HTTPS — no cloud-specific integration needed. Works equally from any cloud. |
+| **WebSocket support** | Real-time bidirectional audio streaming for Gemini Live sessions. |
+| **Single-table key-value/document storage with TTL** | `UserCore`, user-owned singleton items, passkeys, magic links, and refresh tokens all live in DynamoDB. Tokens need automatic expiry. |
+| **Container hosting** | The NestJS backend runs in Docker and is deployed as a single service. |
+| **Secrets management** | JWT signing material and other sensitive configuration must be injected securely at runtime. |
+| **Terraform support** | IaC is already a hard requirement for repeatable provisioning. |
+| **Gemini API access** | Gemini is accessed over HTTPS/WebSockets via API key, so no cloud-specific AI runtime is required. |
 
-### 4.2 Provider Comparison
+### 4.2 Provider Comparison Against the Current Scope
 
-#### AWS (current plan)
+| Provider | Fit for Current Scope | Main Drawbacks | Verdict |
+|---|---|---|---|
+| **AWS** | Strongest fit. ECS Fargate, DynamoDB, Secrets Manager, and ECR align directly with the current implementation and infrastructure modules. | ALB introduces a fixed monthly cost floor in the current infra shape. | **Selected** |
+| **GCP** | Cloud Run and Secret Manager are viable, and Firestore could cover some TTL-driven token flows. | Firestore diverges materially from the current DynamoDB single-table design and its access patterns. | Not selected |
+| **Azure** | Container Apps, Key Vault, and Cosmos DB can cover the broad categories. | Cosmos DB pricing and data-model ergonomics are a poorer fit for the current DynamoDB-centric design. | Not selected |
+| **Fly.io** | Cheapest hosting path and good WebSocket support. | No managed DynamoDB-equivalent, weaker Terraform story, and more operational tradeoffs around surrounding infrastructure. | Not selected |
 
-| Service | AWS Product | Monthly Cost (US East, on-demand) |
-|---|---|---|
-| Container hosting | ECS Fargate (0.25 vCPU, 0.5 GB) | ~$9.00 |
-| Load balancer | ALB | ~$16.20 (fixed) + LCU charges |
-| Managed PostgreSQL | RDS db.t4g.micro + 20 GB gp3 | ~$14.40 |
-| Auth token store | DynamoDB On-Demand | ~$0 (free tier) |
-| Container registry | ECR | ~$0.50 |
-| **Total** | | **~$40–42/month** |
+### 4.3 Recommendation: AWS
 
-**Strengths**: Broadest service catalog, DynamoDB's perpetual free tier + native TTL, ECS Fargate is simple and has no control plane cost, mature Terraform provider, enterprise-grade.
+AWS remains the best fit for the current architecture for these reasons:
 
-**Weaknesses**: ALB alone costs ~$16/month (fixed hourly charge) which dominates the bill for a low-traffic app. Free tier for RDS expires after 12 months.
+1. **Implementation alignment**: The backend and infra already target ECS, DynamoDB, Secrets Manager, and ECR.
+2. **Storage fit**: DynamoDB supports the current single-table user/auth model, including TTL for tokens and transactional uniqueness enforcement for normalized email addresses.
+3. **Operational maturity**: The AWS Terraform provider and surrounding tooling are the most mature option for the current stack.
+4. **Future flexibility**: The same account and provider can later absorb email delivery, CDN, monitoring, and additional persistence without re-platforming.
 
-#### GCP
+The main current cost tradeoff is the ALB fixed floor. If needed later, the ingress layer can be revisited independently of the rest of the stack.
 
-| Service | GCP Product | Monthly Cost (us-central1, on-demand) |
-|---|---|---|
-| Container hosting | Cloud Run (1 always-on instance, 0.25 vCPU, 512 MiB) | ~$14.25 |
-| Load balancer | Included with Cloud Run (no separate LB needed) | $0 |
-| Managed PostgreSQL | Cloud SQL db-f1-micro (shared, 0.6 GiB) + 10 GB SSD | ~$9.40 |
-| Auth token store | Firestore (Native mode) | ~$0 (free tier: 1 GiB storage, 50K reads/day) |
-| Container registry | Artifact Registry | ~$0.50 |
-| **Total** | | **~$24–26/month** |
+## 5. Data Storage Strategy: Single-Table DynamoDB for User and Auth Data
 
-**Cloud Run WebSocket note**: Cloud Run supports WebSockets with a max request timeout of 60 minutes. Since conversation sessions have a 5-minute inactivity timeout, this is sufficient. Cloud Run also handles autoscaling to zero when idle — no traffic = no compute cost.
-
-**Strengths**: Cloud Run eliminates the need for a separate load balancer (built-in HTTPS + WebSocket termination), Cloud SQL shared-core is cheaper than RDS micro, Firestore has a generous perpetual free tier with TTL support, $300 free credits for new accounts, potential Gemini API latency advantage (same Google network).
-
-**Weaknesses**: Cloud Run instance-based billing at ~$14/month is slightly more than ECS Fargate for always-on. Cloud SQL shared-core (db-f1-micro) is not SLA-backed. Smaller Terraform provider ecosystem than AWS.
-
-#### Azure
-
-| Service | Azure Product | Monthly Cost (East US, on-demand) |
-|---|---|---|
-| Container hosting | Container Apps (0.25 vCPU, 0.5 GiB, consumption plan) | ~$9.00 |
-| Load balancer | Included with Container Apps | $0 |
-| Managed PostgreSQL | Azure Database for PostgreSQL Flexible Server (Burstable B1ms, 1 vCPU, 2 GiB) | ~$12.40 |
-| Auth token store | Cosmos DB (serverless, request units) | ~$0–1 (very low at this scale) |
-| Container registry | ACR Basic | ~$5.00 |
-| **Total** | | **~$27–30/month** |
-
-**Strengths**: Container Apps includes load balancing and supports WebSockets natively, competitive managed PostgreSQL pricing, Cosmos DB serverless has TTL support.
-
-**Weaknesses**: Smallest ecosystem for small dev projects, ACR Basic has a fixed $5/month floor, Cosmos DB's RU pricing model is harder to predict, least community momentum for indie/startup projects.
-
-#### Fly.io
-
-| Service | Fly.io Product | Monthly Cost |
-|---|---|---|
-| Container hosting | Shared CPU 1×, 256 MB | ~$1.94 |
-| Load balancer | Included (Anycast + Fly Proxy) | $0 |
-| Managed PostgreSQL | Fly Postgres (1 shared CPU, 256 MB, 1 GB disk) | ~$3.82 |
-| Auth token store | None — use PostgreSQL with scheduled cleanup | $0 |
-| Container registry | Built-in (fly deploy) | $0 |
-| **Total** | | **~$6–8/month** |
-
-**Strengths**: Dramatically cheapest option, excellent WebSocket support (edge-based Anycast routing), built-in deploy pipeline, no separate LB/registry costs, generous free allowance ($5/month of compute).
-
-**Weaknesses**: Fly Postgres is **not a managed database** — it's a self-managed Postgres in a VM. No automatic failover, no managed backups beyond what you script. No DynamoDB equivalent (must use Postgres for tokens). Limited Terraform support (community provider, not official). Smaller company with less enterprise reliability history. No TTL-enabled key-value store.
-
-#### Neon (PostgreSQL-only, serverless alternative)
-
-Worth noting as a complement: **Neon** offers serverless PostgreSQL that scales to zero.
-
-| Plan | Cost | Includes |
-|---|---|---|
-| Free | $0/month | 0.5 GB storage, 190 compute hours/month, autoscaling, scale-to-zero |
-| Launch | $19/month | 10 GB storage, 300 compute hours/month |
-
-If used instead of RDS/Cloud SQL, Neon's free tier could eliminate the Postgres cost entirely at early stage. However, it would need to be paired with a container hosting solution (Fly.io + Neon could be ~$2–6/month total). TypeORM works with Neon since it's standard PostgreSQL.
-
-### 4.3 Cost Summary
-
-| Provider | Monthly Cost (on-demand) | WebSocket Support | Managed DB Quality | Terraform Support | Free Tier |
-|---|---|---|---|---|---|
-| **Fly.io** | **~$6–8** | Excellent | Self-managed | Community | $5/month compute |
-| **GCP** | **~$24–26** | Good (60 min limit) | Managed (shared, no SLA) | Official | $300 credits |
-| **Azure** | **~$27–30** | Good | Managed | Official | $200 credits |
-| **AWS** | **~$40–42** | Good | Managed (SLA-backed) | Official (best) | 12 months |
-
-### 4.4 Recommendation: AWS
-
-Despite being the most expensive option at ~$40/month, **AWS is recommended** for the following reasons:
-
-1. **The cost difference is modest in absolute terms**: The gap between AWS ($42) and GCP ($25) is ~$17/month (~$204/year). For Fly.io the gap is ~$35/month. These are meaningful percentages but small absolute numbers for a production application.
-
-2. **ALB cost can be eliminated**: The biggest AWS cost driver is the ALB at ~$16/month. This can be avoided by placing the NestJS container behind an **API Gateway** (HTTP API at $1/million requests) or by using **ECS with a public IP directly** behind CloudFront for simple setups. This would bring AWS to ~$24–26/month, on par with GCP.
-
-3. **DynamoDB is unmatched for the token use case**: No other provider offers a key-value store with native TTL, automatic item deletion, 3-AZ durability, and a perpetual free tier that covers this use case at $0. On GCP, Firestore comes close but has more complex pricing. On Fly.io, you'd need to DIY token expiry in Postgres.
-
-4. **RDS is the gold standard for managed PostgreSQL**: Unlike Cloud SQL's shared-core (no SLA) or Fly.io's self-managed Postgres (no automatic failover/backups), RDS provides automated backups, point-in-time recovery, and optional Multi-AZ — critical for user data and auth credentials.
-
-5. **Terraform provider maturity**: The AWS Terraform provider is the most mature, best-documented, and most widely used. This matters for a solo/small-team project where IaC debugging time is costly.
-
-6. **Ecosystem breadth**: As the project grows (email delivery via SES, CDN via CloudFront, monitoring via CloudWatch, secrets via Secrets Manager), AWS provides everything in one account. Fly.io and GCP would require stitching together services from multiple providers.
-
-**Cost optimization path**: Start with ECS Fargate + API Gateway (instead of ALB) to bring the monthly cost to ~$24/month, competitive with GCP. If traffic grows, the 12-month RDS free tier covers the initial period, and Reserved Instances can reduce ongoing costs by 30–55%.
-
-## 5. Data Storage Strategy: Token Store & User Data
-
-This section evaluates cost-effective storage options for two distinct data categories:
-1. **Ephemeral auth tokens** (magic links, refresh tokens) — short-lived, TTL-driven, simple key-value lookups.
-2. **User-related data** (User, LearningProfile, UsageStats, Preferences, Passkeys) — relational, long-lived, queried together.
+The current storage decision is simpler than the earlier hybrid exploration: user and auth data live together in a single DynamoDB table, while conversation state remains in memory for the active session.
 
 ### 5.1 Redis (ElastiCache) vs DynamoDB for Magic Links & Refresh Tokens
 
@@ -304,162 +226,65 @@ DynamoDB is the clear winner for this use case:
 - **Latency tradeoff**: Single-digit ms vs sub-ms is negligible for auth token lookups that happen once per login/refresh.
 - **Operational simplicity**: No node sizing, no cluster management, no minimum data charges that dwarf actual usage.
 
-### 5.2 AWS RDS PostgreSQL vs AWS DynamoDB for All Application Data
+### 5.2 Current DynamoDB Single-Table Decision
 
-Nothing is deployed to production yet, so both options are equally viable as the primary data store. This comparison evaluates replacing PostgreSQL entirely with DynamoDB for all data (users, conversations, messages, passkeys), not just adding user tables to an existing RDS instance.
+The current implementation and spec direction use DynamoDB not just for short-lived tokens, but for the entire user/auth slice:
 
-#### Data Characteristics
+- `UserCore`
+- `UserLearningProfile`
+- `UserUsageStats`
+- `UserPreferences`
+- `UserPasskey`
+- `MagicLinkToken`
+- `RefreshToken`
 
-| Aspect | Detail |
+Conversation state remains in memory for the active session and is not yet part of the persistent storage decision.
+
+#### Current User/Auth Item Layout
+
+| Item | Partition Key | Sort Key | Notes |
+|---|---|---|---|
+| `UserCore` | `A#{userId}` | `A` | Minimal identity row: `userId`, `email`, `displayName`, `createdAt`, `updatedAt`, `lastActiveAt`, `emailConfirmed` |
+| `UserPasskey` | `A#{userId}` | `B#{credentialId}` | One-to-many child items for passkeys |
+| `RefreshToken` | `A#{userId}` | `C#{tokenId}` | Child items with TTL |
+| `UserLearningProfile` | `A#{userId}` | `D` | Singleton child item |
+| `UserUsageStats` | `A#{userId}` | `E` | Singleton child item |
+| `UserPreferences` | `A#{userId}` | `F` | Singleton child item |
+| `MagicLinkToken` | `B#{tokenId}` | `A` | Standalone token item with TTL |
+| Email lookup | `C#{normalizedEmail}` | `A` | Enforces exactly one durable user core per normalized email |
+
+#### Current Index and Access Decisions
+
+| Concern | Current Decision |
 |---|---|
-| Entities | User, UserLearningProfile, UserUsageStats, UserPreferences, UserPasskey, Conversation, Message |
-| Relationships | User 1:1 LearningProfile, 1:1 UsageStats, 1:1 Preferences, 1:N Passkeys, 1:N Conversations; Conversation 1:N Messages |
-| Access patterns | Full profile fetch (user + 3 sub-resources), conversation history listing, message retrieval by conversation |
-| Query complexity | Relational JOINs for profile, potential future queries by email, learning level, date ranges, aggregations |
-| Volume (early stage) | Hundreds to low thousands of users; thousands of conversations/messages |
-| Item size | ~1–2 KB per user profile; ~0.5 KB per message |
+| Passkey ceremony user identifier | Use the stable ULID `userId` directly as the WebAuthn `userID` |
+| User-handle lookup GSI | **Removed**. There is no `user-handle-index` in the current model |
+| Token verification lookup | `tokenHash-index` on the compact token-hash attribute |
+| Recent email-link rate limit lookup | `email-createdAt-index` on normalized email plus created-at |
+| Token expiry cleanup | DynamoDB TTL on the configured TTL attribute |
 
-#### Option A: DynamoDB On-Demand (replacing PostgreSQL entirely)
+#### Why the Current Model Works
 
-**Cost (US East, on-demand):**
-
-| Dimension | Detail |
-|---|---|
-| Writes | $1.25/million WRUs. At early-stage volumes → **< $0.10/month** |
-| Reads | $0.25/million RRUs. At early-stage volumes → **< $0.05/month** |
-| Storage | $0.25/GB/month. All app data < 1 GB for months → **< $0.25/month** |
-| **Total estimate** | **< $0.50/month** (well within perpetual free tier: 25 GB storage, 25 WRU/sec, 25 RRU/sec) |
-| Free tier | **Perpetual** — 25 GB storage, 25 RRU/sec, 25 WRU/sec (not time-limited) |
-
-**Capabilities:**
-
-| Dimension | Detail |
-|---|---|
-| Data modeling | Single-table design (recommended) or multiple tables; must denormalize relationships |
-| JOINs | **Not supported** — must fetch related items with multiple queries or denormalize into composite items |
-| Transactions | TransactWriteItems / TransactGetItems (max 100 items, 4 MB per transaction) |
-| Schema enforcement | Application-level only — no DB-level CHECK, FK, or UNIQUE constraints |
-| Schema evolution | No migrations needed; schema-less items |
-| Query flexibility | Primary key + sort key + GSIs only; no ad-hoc SQL, no aggregations |
-| Latency | Single-digit milliseconds |
-| Durability | **3-AZ replication by default** |
-| ORM integration | No TypeORM support — requires `@aws-sdk/client-dynamodb` or `@aws-sdk/lib-dynamodb` |
-| Local development | DynamoDB Local (Docker) or LocalStack |
-
-**DynamoDB Single-Table Design for Auth Data:**
-```
-PK                  SK                      Attributes
-A#<userId>          A                       D, E, C, G, ...
-A#<userId>          B#<credentialId>        AG, AH, AI, AJ, ...
-A#<userId>          C#<tokenId>             AA, AB, AD, ...
-B#<tokenId>         A                       A, E, Z, AA, AB
-C#<normalizedEmail> A                       A
-GSI `user-handle-index`: B → A#<userId>
-GSI `token-hash-index`: AA → token item
-```
-
-#### Option B: AWS RDS PostgreSQL
-
-**Cost (US East, on-demand, Single-AZ):**
-
-| Dimension | Detail |
-|---|---|
-| Instance | db.t4g.micro: **~$12.10/month** ($0.016/hr × 730 hrs) |
-| Storage | gp3, 20 GB: **~$2.30/month** ($0.115/GB/month) |
-| Backup | Included up to 1× instance storage |
-| **Total estimate** | **~$14.40/month** |
-| Free tier | **12 months only** — 750 hrs db.t3.micro + 20 GB storage + 20 GB backup |
-| After free tier | Full on-demand pricing applies (~$14+/month minimum) |
-
-**Capabilities:**
-
-| Dimension | Detail |
-|---|---|
-| Data modeling | Natural relational schema with foreign keys, constraints, indexes |
-| JOINs | **Native** — fetch full user profile in a single query |
-| Transactions | **Full ACID** — no item/size limits |
-| Schema enforcement | **DB-level** CHECK constraints (CEFR levels, enum values), NOT NULL, UNIQUE (email), FK cascades |
-| Schema evolution | Liquibase migrations (structured, version-controlled) |
-| Query flexibility | **Full SQL** — ad-hoc queries, aggregations, window functions, CTEs |
-| Latency | Low single-digit milliseconds (within same VPC) |
-| Durability | Single-AZ (default); Multi-AZ available at 2× cost |
-| ORM integration | **TypeORM** — entities, repositories, relations, eager loading |
-| Local development | Docker `postgres:17` (already configured in docker-compose.yml) |
-
-#### Comparison Summary
-
-| Factor | DynamoDB On-Demand | RDS PostgreSQL |
-|---|---|---|
-| Monthly cost (early stage) | **< $0.50** (perpetual free tier) | ~$14.40 (free tier expires after 12 mo) |
-| Scale-to-zero | **Yes** (pay per request) | No (always-on instance) |
-| Data model fit | Poor (relational data forced into NoSQL) | **Excellent** (natural relational schema) |
-| Full profile fetch | Multiple queries or denormalized blob | **Single JOIN query** |
-| Schema enforcement | Application-level only | **DB-level constraints, CHECK, FK** |
-| Query flexibility | Key/index only | **Full SQL** |
-| ORM / TypeORM | Not supported (custom SDK layer) | **Native support** |
-| Local dev | DynamoDB Local or LocalStack | **Docker postgres (already set up)** |
-| Migrations | None needed (schema-less) | Liquibase (already configured) |
-| Infrastructure | Fully managed, no sizing | Must choose instance size |
-| Durability | **3-AZ by default** | Single-AZ default; Multi-AZ at 2× cost |
-| Free tier duration | **Perpetual** | 12 months only |
-| Operational overhead | **None** | Patches, backups, sizing, scaling |
-
-#### Cost Projection
-
-| Timeframe | DynamoDB | RDS PostgreSQL (db.t4g.micro) |
-|---|---|---|
-| Month 1–12 (free tier) | ~$0 | ~$0 (free tier covers t3.micro) |
-| Month 13–24 | ~$0 (still in perpetual free tier) | **~$14.40/month** = ~$173/year |
-| Year 2+ ongoing | ~$0–$1/month at low volumes | **~$173/year** minimum |
-| At 10K users, moderate traffic | ~$5–15/month | ~$14–30/month (may need db.t4g.small) |
-| At 100K users, high traffic | ~$50–150/month | ~$50–200/month (db.r6g series) |
-
-**Key cost insight**: DynamoDB is dramatically cheaper at low-to-moderate volumes due to true pay-per-request pricing and the perpetual free tier. RDS has a fixed floor of ~$14/month regardless of traffic. At high scale, costs converge.
-
-#### Tradeoff Analysis
-
-**Arguments for DynamoDB (all-in):**
-- **~$170/year savings** in the post-free-tier steady state vs RDS minimum
-- True scale-to-zero: zero cost when the app has no traffic
-- Zero operational overhead: no patching, no instance sizing, no storage scaling
-- Auth tokens (magic links, refresh tokens) are already going to DynamoDB — single data platform
-- 3-AZ durability by default without paying 2× for Multi-AZ
-
-**Arguments for RDS PostgreSQL:**
-- **Data model fit**: User data is inherently relational (1:1, 1:N relationships with constraints). DynamoDB requires denormalization or multi-query patterns that increase application complexity
-- **Schema safety**: DB-level CHECK constraints (CEFR levels), UNIQUE (email), FK cascades catch bugs that application-level validation misses
-- **Query flexibility**: Full SQL enables future features like admin dashboards, analytics, searching users by criteria, aggregation reports — all impossible in DynamoDB without exporting to another service
-- **TypeORM ecosystem**: Repository pattern, eager/lazy loading, relation decorators, query builders — all lost with DynamoDB. Must write a custom data access layer
-- **Local dev simplicity**: Docker Postgres is already configured. DynamoDB Local works but adds Docker complexity and has behavioral differences from production
-- **Conversation/Message data**: Messages with conversation history, ordered retrieval, and relational integrity (FK to conversation, FK to user) are a natural relational fit. Single-table design for this is complex
-- **Team familiarity**: SQL is universally understood; DynamoDB single-table design has a steep learning curve
-
-#### Recommendation: Hybrid — PostgreSQL (RDS) for relational data, DynamoDB single-table for auth
-
-Despite DynamoDB's significant cost advantage at low volumes, **PostgreSQL is recommended for relational application data** (profiles, conversations, messages) for the following reasons:
-
-1. **Application complexity cost exceeds infrastructure cost**: The ~$14/month RDS cost is far less expensive than the engineering time to build and maintain a custom DynamoDB data access layer, handle denormalization, and work around missing JOINs/constraints. This is a solo/small-team project where developer time is the scarcest resource.
-
-2. **Data integrity**: User email uniqueness, CEFR level validation, FK cascades on user deletion — these are critical for an auth-gated app. Relying solely on application-level validation for these invites subtle bugs.
-
-3. **Future flexibility**: Full SQL means adding a "find users by learning level" admin query, a "top streaks" leaderboard, or conversation analytics is trivial. With DynamoDB, each new access pattern requires a new GSI or data export pipeline.
-
-4. **The cost gap narrows with scale**: At the point where DynamoDB's cost advantage matters (~$170/year savings at low volume), the app likely has revenue or can optimize RDS costs with Reserved Instances (up to 55% savings = ~$77/year, making the gap only ~$93/year).
-
-5. **DynamoDB wins for the auth domain**: Users, passkeys, magic link tokens, and refresh tokens form a self-contained auth domain with simple access patterns (lookup by ID, email, tokenHash, userId). A single DynamoDB table with separate PK markers (`A#`, `B#`, `C#`) and SK markers (`A`, `B#`, `C#`) keeps all auth data together with shared GSIs, native TTL auto-cleanup for tokens, and scale-to-zero pricing.
+1. **The minimal core row stays stable**: core identity fields remain compact and easy to reason about.
+2. **User-owned singleton items avoid nested-document bloat**: profile, usage, and preferences evolve independently without turning the core row into a catch-all blob.
+3. **Email uniqueness is enforced transactionally**: the normalized-email lookup item prevents duplicate account creation.
+4. **The access patterns are key-driven**: lookups are by `userId`, normalized email, credential ID within a user partition, or token hash.
+5. **TTL remains native and automatic**: magic-link tokens and refresh tokens expire without custom cleanup jobs.
 
 ### 5.3 Overall Architecture Decision
 
 | Data Category | Storage | Rationale |
 |---|---|---|
-| User | **DynamoDB** (single table) | Auth domain entity, simple key-value lookups by userId/email |
-| UserPasskey | **DynamoDB** (single table) | Auth domain entity, lookup by credentialId/userId/passkeyId |
-| Magic Link Tokens | **DynamoDB** (single table) | Ephemeral key-value, native TTL auto-cleanup, scale-to-zero |
-| Refresh Tokens | **DynamoDB** (single table) | Ephemeral key-value, native TTL, same table as all auth data |
-| UserLearningProfile, UserUsageStats, UserPreferences | **PostgreSQL (RDS)** | Relational data with constraints, JOINs, TypeORM |
-| Conversation, Message | **PostgreSQL (RDS)** | FK relationships, ordered queries, history retrieval |
+| `UserCore` | **DynamoDB** | Minimal durable account identity |
+| `UserLearningProfile` | **DynamoDB** | Dedicated user-owned singleton item |
+| `UserUsageStats` | **DynamoDB** | Dedicated user-owned singleton item |
+| `UserPreferences` | **DynamoDB** | Dedicated user-owned singleton item |
+| `UserPasskey` | **DynamoDB** | Passkey lookup and update patterns are partition-local |
+| `MagicLinkToken` | **DynamoDB** | Ephemeral token data with native TTL |
+| `RefreshToken` | **DynamoDB** | Ephemeral token data with native TTL |
+| `Conversation`, `Message` | **In-memory (current scope)** | Active-session state only; persistent conversation storage is still out of scope |
 
-All auth-related entities share a single DynamoDB table named `ichbinkalt` using a single-table design with compact `pk`/`sk` values and separate PK/SK marker alphabets: `pk` uses `A#`, `B#`, `C#`, while `sk` uses `A`, `B#`, `C#`. This hybrid approach uses each engine where it excels: DynamoDB for the self-contained auth domain with simple access patterns and native TTL, PostgreSQL for relational data with integrity constraints. The ~$14/month RDS cost is justified by the significant reduction in application complexity for relational features and the preservation of full SQL flexibility for future features.
+This is the current architecture reflected by the spec set in this session. The earlier hybrid `RDS + DynamoDB` exploration is no longer the active direction.
 
 ## 6. Secrets Management: JWT Signing Key Storage
 
@@ -526,13 +351,13 @@ The backend issues JWT access tokens signed with a private key (or symmetric sec
 
 ### 6.4 Recommendation: AWS Secrets Manager
 
-**AWS Secrets Manager is recommended** for storing the JWT signing key (and other sensitive credentials like the WebAuthn RP configuration and database password):
+**AWS Secrets Manager is recommended** for storing the JWT signing key (and other sensitive credentials like the WebAuthn RP configuration and email-delivery provider credentials):
 
 1. **Security-first**: The JWT signing key is the highest-value secret in the system. Secrets Manager provides KMS encryption, IAM access control, and CloudTrail auditing out of the box.
 2. **Cost is negligible**: At $0.40/month for 1 secret (or ~$1.20/month if JWT key, DB password, and WebAuthn config are stored as 3 secrets), this is trivial relative to the ~$40/month infrastructure bill.
 3. **Rotation without redeployment**: When it's time to rotate the JWT signing key, Secrets Manager's versioning (`AWSCURRENT` / `AWSPREVIOUS`) allows the app to verify tokens signed with either version during the transition. No need for a coordinated restart.
 4. **ECS native integration**: The ECS task definition can reference the Secrets Manager ARN directly via `valueFrom`, injecting the secret as an environment variable at container start. This means `ConfigService` reads it from `process.env.JWT_SECRET` as it does today — zero application code changes beyond adding the env var to the Zod schema.
-5. **Already in the AWS ecosystem**: The project already uses DynamoDB, RDS, ECS, and ECR. Secrets Manager is a natural addition with no new provider or billing relationship.
+5. **Already in the AWS ecosystem**: The project already uses DynamoDB, ECS, ECR, and AWS-managed infrastructure modules. Secrets Manager is a natural addition with no new provider or billing relationship.
 
 ### 6.5 Implementation Approach
 
@@ -542,44 +367,27 @@ The backend issues JWT access tokens signed with a private key (or symmetric sec
 4. **Application**: No code change — `ConfigService` reads `JWT_SECRET` from `process.env` as before. The secret is already decrypted and injected by ECS.
 5. **Local development**: Continue using `.env` file with a local-only development key. The Secrets Manager integration is transparent — the app only sees an environment variable regardless of where it came from.
 
-## 7. DynamoDB Adapter Test Strategy: Reusing Production Terraform via tflocal + LocalStack
+## 7. DynamoDB Adapter Test Strategy: Reusing Production Terraform via Host Terraform + LocalStack
 
 ### 7.1 Problem Statement
 
-The project uses DynamoDB for ephemeral auth token storage (magic links, refresh tokens). Adapter tests for the DynamoDB repositories must exercise real DynamoDB behavior (TTL semantics, key structure, conditional writes) rather than mocks. Two approaches exist:
+The project uses DynamoDB for the user/auth single-table model. Adapter tests for the DynamoDB repositories must exercise real DynamoDB behavior (key structure, GSIs, conditional writes, transactions, TTL configuration) rather than mocks. Two approaches exist:
 
 1. **Separate IaC for tests**: Write a second set of Terraform resources (or raw SDK `createTable` calls) just for the test environment. Duplicates the production schema definition and risks drift.
 2. **Reuse the production Terraform module**: Apply the same `infra/aws/modules/dynamodb/` module against a local DynamoDB-compatible service during tests. Schema changes are automatically reflected in tests.
 
 The goal is option 2 — no separate IaC, production module is the single source of truth.
 
-### 7.2 Solution: `tflocal` + LocalStack via Testcontainers
+### 7.2 Solution: Stage the Terraform Module and Apply It with Host `terraform`
 
 #### How it works
 
-LocalStack provides [`tflocal`](https://github.com/localstack/terraform-local) — a thin wrapper around the `terraform` CLI. It uses Terraform's [Override mechanism](https://developer.hashicorp.com/terraform/language/files/override) to generate a temporary `localstack_providers_override.tf` file that redirects every AWS provider endpoint to `http://localhost:4566`. Production `.tf` files are **not modified**.
+The current helper does not use `tflocal`. Instead it stages a temporary Terraform workspace under `.terraform-test-tmp/`, copies in:
 
-```
-tflocal apply  →  terraform apply (with auto-generated endpoint overrides)
-```
+- the production DynamoDB module from `infra/aws/modules/dynamodb`, and
+- the LocalStack-specific test root from `infra/aws/localstack/test/dynamodb`.
 
-The generated provider override looks like:
-
-```hcl
-provider "aws" {
-  access_key                  = "mock_access_key"
-  secret_key                  = "mock_secret_key"
-  region                      = "us-east-1"
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
-
-  endpoints {
-    dynamodb = "http://localhost:4566"
-    # ... all services redirected
-  }
-}
-```
+It then writes a generated `terraform.auto.tfvars.json` file containing the LocalStack endpoint URL, region, and environment, and runs the host `terraform` binary directly.
 
 #### Integration with Testcontainers
 
@@ -587,56 +395,27 @@ The test lifecycle:
 
 1. **Start LocalStack via Testcontainers** — the `@testcontainers/localstack` module starts a `localstack/localstack` Docker container with a dynamically assigned host port.
 2. **Resolve the endpoint URL** — `container.getConnectionUri()` returns `http://localhost:<mapped-port>`.
-3. **Set `AWS_ENDPOINT_URL`** — export this env var before invoking `tflocal`. The `tflocal` wrapper reads it and injects it into all provider endpoint overrides.
-4. **Run `tflocal init && tflocal apply -auto-approve`** — applies `infra/aws/modules/dynamodb/` against LocalStack, creating the exact same table(s) and TTL configuration as production.
+3. **Stage a temporary Terraform workspace** — copy the test harness and the production module into a temp directory.
+4. **Write `terraform.auto.tfvars.json`** — include the LocalStack endpoint URL and standard test values.
+5. **Run `terraform init && terraform apply -auto-approve`** — apply the staged module against LocalStack, creating the same table shape, GSIs, and TTL configuration expected by the repositories.
 5. **Run adapter tests** — the DynamoDB SDK client in the test suite is configured with the same `AWS_ENDPOINT_URL`, pointing at the now-provisioned LocalStack container.
 6. **Tear down** — Testcontainers stops and removes the container after the test suite.
-
-```typescript
-// test/adapters/secondary/dynamodb/setup.ts (illustrative)
-import { LocalStackContainer } from '@testcontainers/localstack';
-import { execSync } from 'child_process';
-
-let container: StartedLocalStackContainer;
-
-beforeAll(async () => {
-  container = await new LocalStackContainer('localstack/localstack:latest').start();
-  const endpoint = container.getConnectionUri();  // e.g. http://localhost:32771
-
-  execSync('tflocal init -input=false', {
-    cwd: 'infra/aws/modules/dynamodb',
-    env: { ...process.env, AWS_ENDPOINT_URL: endpoint },
-  });
-  execSync('tflocal apply -auto-approve -input=false', {
-    cwd: 'infra/aws/modules/dynamodb',
-    env: { ...process.env, AWS_ENDPOINT_URL: endpoint },
-  });
-
-  process.env.AWS_ENDPOINT_URL = endpoint;
-});
-
-afterAll(async () => {
-  await container.stop();
-  delete process.env.AWS_ENDPOINT_URL;
-});
-```
 
 ### 7.3 Caveats and Constraints
 
 | Concern | Detail |
 |---|---|
 | **LocalStack service parity** | DynamoDB is fully supported on LocalStack's free tier. TTL, conditional writes, GSIs, and `TransactWriteItems` are all covered. No Pro subscription needed for this use case. |
-| **`tflocal` installation** | `tflocal` is a Python CLI tool (`pip install terraform-local`). Must be available in the CI environment. Add to CI setup steps alongside `terraform`. |
-| **Local Terraform modules** | If `infra/aws/modules/dynamodb/` references other local modules, set `ADDITIONAL_TF_OVERRIDE_LOCATIONS` to those module paths so `tflocal` drops override files there too. |
-| **Terraform state** | Each test run uses a fresh LocalStack container and a fresh `tflocal apply`. No state backend is needed — use a local state file (default) isolated to the test run. |
+| **Host `terraform` binary** | The test helper shells out to `terraform` directly. If `terraform` is missing or not executable, adapter tests fail with `spawn terraform ENOENT` or `spawn terraform EACCES`. |
+| **Terraform state** | Each test run uses a fresh LocalStack container and a fresh staged workspace. No remote state backend is needed. |
 | **Parallelism** | If multiple test workers run concurrently, each must have its own LocalStack container and mapped port to avoid table name collisions. |
-| **Table name parameterization** | The production DynamoDB module should accept table names as Terraform input variables (already the pattern). Tests pass the same variable values, ensuring schema parity. |
+| **Table name parameterization** | The production DynamoDB module accepts test values via the generated `terraform.auto.tfvars.json`, ensuring schema parity. |
 
 ### 7.4 Decision
 
-**Use `tflocal` + LocalStack via Testcontainers for DynamoDB adapter tests.** 
+**Use LocalStack via Testcontainers and apply the staged production Terraform module with host `terraform` for DynamoDB adapter tests.**
 
 - The production `infra/aws/modules/dynamodb/` module is the single source of truth for the DynamoDB table schema and TTL configuration.
 - DynamoDB adapter tests apply this module against LocalStack at test startup, exercising the same infrastructure definition that ships to production.
 - No separate `createTable` SDK calls or test-only IaC. Schema changes in the Terraform module are automatically reflected in adapter tests on the next run.
-- `tflocal` is installed as a CI dependency alongside `terraform`. Locally, developers must have both `terraform` and `tflocal` installed (via `pip install terraform-local`).
+- CI and local development both require an executable host `terraform` binary on `PATH`.
